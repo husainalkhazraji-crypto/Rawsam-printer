@@ -2,15 +2,12 @@ import SwiftUI
 import PhotosUI
 
 enum Tool: String, CaseIterable, Identifiable {
-    case style, size, crop, rotate, mirror, copy, text, add, heat
+    case edit, crop, copy, text, add, heat
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .style: return "الصورة"
-        case .size: return "الحجم"
+        case .edit: return "تعديل"
         case .crop: return "قص"
-        case .rotate: return "تدوير"
-        case .mirror: return "مرآة"
         case .copy: return "نسخ"
         case .text: return "نص"
         case .add: return "إضافة"
@@ -19,32 +16,32 @@ enum Tool: String, CaseIterable, Identifiable {
     }
     var icon: String {
         switch self {
-        case .style: return "wand.and.stars"
-        case .size: return "arrow.up.left.and.arrow.down.right"
+        case .edit: return "wand.and.stars"
         case .crop: return "crop"
-        case .rotate: return "rotate.right"
-        case .mirror: return "arrow.left.and.right.righttriangle.left.righttriangle.right"
         case .copy: return "plus.square.on.square"
         case .text: return "textformat"
         case .add: return "photo.badge.plus"
         case .heat: return "flame"
         }
     }
-    var needsSelection: Bool { ![.text, .add, .heat].contains(self) }
+    var needsSelection: Bool { [.edit, .crop, .copy].contains(self) }
 }
+
+let darkHeatWarning = "يرجى استخدام هذا الخيار فقط في الرسمات ذات الخطوط الدقيقة"
 
 struct EditorView: View {
     let source: DesignSource
     @EnvironmentObject private var printer: PrinterManager
     @StateObject private var model = EditorModel()
     @AppStorage("printMode") private var mode: PrintMode = .mhtLegacy
-    @AppStorage("density") private var density: Density = .low
+    @AppStorage("density") private var density: Density = .normal
     @State private var panel: Tool?
     @State private var loading = true
     @State private var rendering = false
     @State private var showPrinters = false
     @State private var cropping = false
     @State private var textSheet = false
+    @State private var heatWarning = false
     @State private var addPick: PhotosPickerItem?
 
     var body: some View {
@@ -88,6 +85,15 @@ struct EditorView: View {
             }
             .presentationDetents([.height(230)])
         }
+        .alert("تنبيه", isPresented: $heatWarning) {
+            Button("تمام", role: .cancel) {}
+        } message: {
+            Text(darkHeatWarning)
+        }
+        .onChange(of: density) { _, new in if new == .thick { heatWarning = true } }
+        .onChange(of: model.selectedID) { _, _ in
+            if panel == .edit && (model.selected == nil || model.selected?.text != nil) { panel = nil }
+        }
         .onChange(of: addPick) { _, item in
             guard let item else { return }
             Task {
@@ -130,7 +136,6 @@ struct EditorView: View {
         .padding(.vertical, 6)
         .background(Color.white)
         .environment(\.layoutDirection, .leftToRight)
-        .onTapGesture { if model.selected != nil { panel = .size } }
     }
 
     private func value(_ name: String, _ v: CGFloat) -> some View {
@@ -140,21 +145,28 @@ struct EditorView: View {
     // MARK: - الأدوات
 
     private var toolbar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(Tool.allCases) { tool in
+        HStack(spacing: 0) {
+            ForEach(Tool.allCases) { tool in
+                Group {
                     if tool == .add {
                         PhotosPicker(selection: $addPick, matching: .images) { toolLabel(tool) }
                     } else {
                         Button { tap(tool) } label: { toolLabel(tool) }
-                            .disabled(tool.needsSelection && model.selected == nil)
+                            .disabled(!enabled(tool))
                     }
                 }
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 8)
         }
+        .padding(.horizontal, 4)
         .padding(.vertical, 8)
         .background(Color.white)
+    }
+
+    private func enabled(_ tool: Tool) -> Bool {
+        guard tool.needsSelection else { return true }
+        guard let layer = model.selected else { return false }
+        return tool != .edit || layer.text == nil
     }
 
     private func toolLabel(_ tool: Tool) -> some View {
@@ -162,17 +174,20 @@ struct EditorView: View {
             Image(systemName: tool.icon).font(.system(size: 20))
             Text(tool.title).font(.caption2)
         }
-        .frame(width: 62, height: 48)
-        .foregroundStyle(panel == tool ? Color.brand : Color.primary)
+        .frame(maxWidth: .infinity, minHeight: 48)
+        .foregroundStyle(panel == tool ? Color.brand : (enabled(tool) ? Color.primary : Color.secondary.opacity(0.5)))
         .background(RoundedRectangle(cornerRadius: 10).fill(panel == tool ? Color.brand.opacity(0.1) : .clear))
+        .contentShape(Rectangle())
     }
 
     private func tap(_ tool: Tool) {
         switch tool {
-        case .style, .size, .heat: withAnimation(.snappy) { panel = panel == tool ? nil : tool }
+        case .edit:
+            // أول ضغطة تحول الصورة لرسم ستنسل بأفضل إعدادات.
+            if model.selected?.style.mode == .original { model.update { $0.style = .stencil } }
+            withAnimation(.snappy) { panel = panel == .edit ? nil : .edit }
+        case .heat: withAnimation(.snappy) { panel = panel == .heat ? nil : .heat }
         case .crop: cropping = true
-        case .rotate: model.rotate90()
-        case .mirror: model.update { $0.mirrored.toggle() }
         case .copy: model.duplicate()
         case .text: textSheet = true
         case .add: break
@@ -183,8 +198,7 @@ struct EditorView: View {
     private func panelView(_ tool: Tool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             switch tool {
-            case .style: stylePanel
-            case .size: sizePanel
+            case .edit: editPanel
             case .heat: heatPanel
             default: EmptyView()
             }
@@ -200,64 +214,29 @@ struct EditorView: View {
     }
 
     @ViewBuilder
-    private var stylePanel: some View {
-        if model.selected == nil {
-            Text("اختار صورة من الورقة").foregroundStyle(.secondary)
-        } else if model.selected?.text != nil {
-            Text("النص يطبع أسود. غيّر حجمه بأصبعين أو من «الحجم».").foregroundStyle(.secondary)
+    private var editPanel: some View {
+        if model.selected?.style.mode == .drawing {
+            slider("خطوط", styleBinding.lines)
+            slider("السُمك", styleBinding.thickness)
+            slider("تظليل", styleBinding.shading)
+            HStack {
+                Button("الإعدادات الأفضل") { model.update { $0.style = .stencil } }
+                Spacer()
+                Button("الصورة الأصلية") { model.update { $0.style.mode = .original } }
+            }
+            .buttonStyle(.bordered)
+            .font(.subheadline)
         } else {
-            Picker("", selection: styleBinding.mode) {
-                ForEach(ImageMode.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            switch styleBinding.wrappedValue.mode {
-            case .lines:
-                slider("التفاصيل", styleBinding.detail)
-                slider("غمقان الخط", styleBinding.weight)
-                slider("تعبئة الغامق", styleBinding.fill)
-            case .mono, .dither:
-                slider("الغمقان", styleBinding.threshold, 0.1...0.9)
-            }
+            Button("حوّل لرسم ستنسل") { model.update { $0.style = .stencil } }
+                .buttonStyle(.borderedProminent)
         }
     }
 
-    private func slider(_ title: String, _ value: Binding<Double>, _ range: ClosedRange<Double> = 0...1) -> some View {
+    private func slider(_ title: String, _ value: Binding<Double>) -> some View {
         HStack {
-            Text(title).frame(width: 88, alignment: .leading)
-            Slider(value: value, in: range)
+            Text(title).frame(width: 56, alignment: .leading)
+            Slider(value: value, in: 0...1)
         }
-        .font(.subheadline)
-    }
-
-    private var widthBinding: Binding<Double> {
-        Binding(get: { Double(model.selected?.widthMM ?? 0) },
-                set: { v in model.update { $0.widthMM = CGFloat(max(5, min(400, v))) } })
-    }
-
-    private var heightBinding: Binding<Double> {
-        Binding(get: { Double(model.selected?.heightMM ?? 0) },
-                set: { v in model.update { $0.widthMM = CGFloat(max(5, min(400, v))) / max($0.aspect, 0.01) } })
-    }
-
-    @ViewBuilder
-    private var sizePanel: some View {
-        HStack(spacing: 8) {
-            Text("العرض")
-            TextField("", value: widthBinding, format: .number.precision(.fractionLength(0...1)))
-                .keyboardType(.decimalPad).textFieldStyle(.roundedBorder).frame(width: 70)
-            Text("الارتفاع")
-            TextField("", value: heightBinding, format: .number.precision(.fractionLength(0...1)))
-                .keyboardType(.decimalPad).textFieldStyle(.roundedBorder).frame(width: 70)
-            Text("ملم").foregroundStyle(.secondary)
-        }
-        .font(.subheadline)
-        Slider(value: widthBinding, in: 10...210)
-        HStack {
-            Button("بالنص") { model.update { $0.center.x = EditorModel.pageW / 2 } }
-            Button("لأعلى الورقة") { model.update { $0.center.y = model.bounds($0).height / 2 + 5 } }
-            Button("بعرض الورقة") { model.update { $0.widthMM = 200; $0.center.x = EditorModel.pageW / 2 } }
-        }
-        .buttonStyle(.bordered)
         .font(.subheadline)
     }
 
@@ -269,8 +248,9 @@ struct EditorView: View {
         }
         .pickerStyle(.segmented)
         .disabled(mode == .escpos)
-        Text("إذا طلعت الخطوط باهتة زيد الحرارة، وإذا انتشرت قللها.")
-            .font(.caption).foregroundStyle(.secondary)
+        Text(density == .thick ? darkHeatWarning : "إذا طلعت الخطوط باهتة زيد الحرارة، وإذا انتشرت قللها.")
+            .font(.caption)
+            .foregroundStyle(density == .thick ? Color.brand : Color.secondary)
     }
 
     // MARK: - الطباعة
@@ -398,16 +378,22 @@ struct CanvasView: View {
             }
         }
         .overlay(alignment: .topLeading) {
+            if selected { handle("xmark").offset(x: -22, y: -22).onTapGesture { model.delete() } }
+        }
+        .overlay(alignment: .topTrailing) {
+            if selected { handle("rotate.right").offset(x: 22, y: -22).onTapGesture { model.rotate90() } }
+        }
+        .overlay(alignment: .bottomLeading) {
             if selected {
-                handle("xmark")
-                    .offset(x: -14, y: -14)
-                    .onTapGesture { model.delete() }
+                handle("arrow.left.and.right.righttriangle.left.righttriangle.right")
+                    .offset(x: -22, y: 22)
+                    .onTapGesture { model.update { $0.mirrored.toggle() } }
             }
         }
         .overlay(alignment: .bottomTrailing) {
             if selected {
                 handle("arrow.up.left.and.arrow.down.right")
-                    .offset(x: 14, y: 14)
+                    .offset(x: 22, y: 22)
                     .gesture(resize(layer, s))
             }
         }
@@ -415,13 +401,15 @@ struct CanvasView: View {
         .position(x: layer.center.x * s, y: layer.center.y * s)
     }
 
+    /// زر صغير بالشكل، بس مساحة اللمس كبيرة (44 نقطة) حتى ينضغط بسهولة.
     private func handle(_ icon: String) -> some View {
         Image(systemName: icon)
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: 26, height: 26)
             .background(Circle().fill(Color.black))
-            .contentShape(Circle())
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
     }
 
     private func resize(_ layer: Layer, _ s: CGFloat) -> some Gesture {

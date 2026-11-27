@@ -61,7 +61,6 @@ final class EditorModel: ObservableObject {
         var layer = Layer(source: img, center: .zero, widthMM: 120)
         layer.widthMM = min(150, 200 / max(layer.aspect, 0.01))
         layer.center = CGPoint(x: Self.pageW / 2, y: 15 + layer.heightMM / 2)
-        layer.style.mode = Filters.looksLikePhoto(img) ? .lines : .mono
         layers.append(layer)
         selectedID = layer.id
     }

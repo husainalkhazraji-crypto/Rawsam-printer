@@ -44,7 +44,7 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
     func looksLikePrinter(_ device: FoundDevice) -> Bool {
         let n = device.name.uppercased()
         if n == UserDefaults.standard.string(forKey: lastNameKey)?.uppercased() { return true }
-        return ["MHT", "P19", "HERCULES", "PRINTER", "TATTOO", "STENCIL", "GT-", "IMP-", "PRT"].contains { n.contains($0) }
+        return ["MHT", "P19", "HERCULES", "PRINTER", "TATTOO", "STENCIL", "GT-", "IMP-", "PRT", "PHOMEMO", "M08", "ITARI", "ATS", "A4"].contains { n.contains($0) }
     }
 
     private func note(_ text: String) {

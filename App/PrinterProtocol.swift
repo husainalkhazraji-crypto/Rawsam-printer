@@ -25,12 +25,13 @@ struct Bitmap {
 }
 
 enum Density: String, CaseIterable, Identifiable {
-    case low, normal, thick
+    case low, normal, medium, thick
     var id: String { rawValue }
     var title: String {
         switch self {
         case .low: return "خفيف"
         case .normal: return "عادي"
+        case .medium: return "وسط"
         case .thick: return "غامق"
         }
     }
@@ -70,6 +71,7 @@ enum PrinterProtocol {
         switch density {
         case .low: heat = new ? 100 : 130
         case .normal: heat = new ? 120 : 160
+        case .medium: heat = new ? 135 : 175
         case .thick: heat = new ? 150 : 190
         }
         let settings: [(UInt8, UInt8)] = [(1, new ? 8 : 16), (2, 100), (3, 1), (4, new ? 4 : 2), (5, 0), (6, heat)]

@@ -1,27 +1,22 @@
 import UIKit
 
-enum ImageMode: String, CaseIterable, Identifiable {
-    case lines, mono, dither
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .lines: return "خطوط"
-        case .mono: return "أبيض وأسود"
-        case .dither: return "تظليل"
-        }
-    }
+enum ImageMode: String {
+    case original   // الصورة على حالها
+    case drawing    // رسم ستنسل أسود وأبيض
 }
 
 struct ImageStyle: Hashable {
-    var mode: ImageMode = .mono
-    var threshold = 0.5   // أبيض وأسود والتظليل: كل ما زاد صار أغمق
-    var detail = 0.5      // الخطوط: كثرة التفاصيل
-    var weight = 0.5      // الخطوط: غمقان الخط
-    var fill = 0.0        // الخطوط: تعبئة المناطق الغامقة
+    var mode: ImageMode = .original
+    var lines = 0.5       // كثرة الخطوط والتفاصيل
+    var thickness = 0.33  // سمك الخط
+    var shading = 0.0     // تظليل المناطق الغامقة (صفر = خطوط بس، الأفضل للستنسل)
+
+    /// أفضل إعدادات للستنسل: الخطوط الأساسية بس، بسمك واضح، وبدون تظليل.
+    static let stencil = ImageStyle(mode: .drawing)
 }
 
 enum Filters {
-    /// يرجع صورة شفافة بنقاط سوداء، بالحجم المطلوب بالضبط.
+    /// يرجع الصورة بالحجم المطلوب بالضبط. الرسم: نقاط سوداء على خلفية شفافة.
     static func process(_ source: CGImage, crop: NormRect, style: ImageStyle, width: Int, height: Int) -> CGImage? {
         guard width > 0, height > 0 else { return nil }
         var image = source
@@ -30,6 +25,8 @@ enum Filters {
                               width: crop.w * Double(source.width), height: crop.h * Double(source.height)).integral
             if let cropped = source.cropping(to: rect) { image = cropped }
         }
+        if style.mode == .original { return scaled(image, width, height) }
+
         var gray = [UInt8](repeating: 255, count: width * height)
         let drawn = gray.withUnsafeMutableBytes { buffer -> Bool in
             guard let ctx = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
@@ -42,40 +39,24 @@ enum Filters {
             return true
         }
         guard drawn else { return nil }
-
-        let black: [Bool]
-        switch style.mode {
-        case .mono:
-            let cut = UInt8(max(1, min(254, style.threshold * 255)))
-            black = gray.map { $0 < cut }
-        case .dither:
-            black = dither(gray, width, height, style.threshold)
-        case .lines:
-            black = lines(gray, width, height, style)
-        }
-        return mask(black, width, height)
+        return mask(stencil(gray, width, height, style), width, height)
     }
 
-    /// صورة فوتوغرافية (بيها رمادي كثير) لو رسمة خطوط؟
-    static func looksLikePhoto(_ image: UIImage) -> Bool {
-        guard let cg = image.cgImage else { return false }
-        let side = 64
-        var gray = [UInt8](repeating: 255, count: side * side)
-        gray.withUnsafeMutableBytes { buffer in
-            guard let ctx = CGContext(data: buffer.baseAddress, width: side, height: side, bitsPerComponent: 8,
-                                      bytesPerRow: side, space: CGColorSpaceCreateDeviceGray(),
-                                      bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return }
-            ctx.setFillColor(gray: 1, alpha: 1)
-            ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
-            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
-        }
-        let mid = gray.filter { $0 > 50 && $0 < 205 }.count
-        return Double(mid) / Double(gray.count) > 0.3
+    /// الصورة الأصلية بخلفية بيضاء.
+    private static func scaled(_ image: CGImage, _ w: Int, _ h: Int) -> CGImage? {
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        ctx.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()
     }
 
-    // MARK: - الخطوط (فرق غاوسيين، مثل رسم الستنسل)
+    // MARK: - الرسم (فرق غاوسيين، مثل رسم الستنسل)
 
-    private static func lines(_ g: [UInt8], _ w: Int, _ h: Int, _ s: ImageStyle) -> [Bool] {
+    private static func stencil(_ g: [UInt8], _ w: Int, _ h: Int, _ s: ImageStyle) -> [Bool] {
         let n = w * h
         var hist = [Int](repeating: 0, count: 256)
         for v in g { hist[Int(v)] += 1 }
@@ -90,14 +71,72 @@ enum Filters {
         let f = g.map { min(1, max(0, (Float($0) - lo) / (hi - lo))) }
 
         let scale = Float(max(w, h)) / 1000
-        let sigma = max(0.6, (3.0 - 2.2 * Float(s.detail)) * scale)
+        let sigma = max(0.6, (2.6 - 1.8 * Float(s.lines)) * scale)
         let g1 = blur(f, w, h, sigma)
         let g2 = blur(f, w, h, sigma * 1.6)
-        let eps = -0.002 - 0.02 * Float(1 - s.weight)
-        let fillCut = Float(s.fill) * 0.5
+        let eps = -0.006 - 0.016 * Float(1 - s.lines)
         var out = [Bool](repeating: false, count: n)
-        for i in 0..<n {
-            out[i] = g1[i] - 0.985 * g2[i] < eps || g1[i] < fillCut
+        for i in 0..<n { out[i] = g1[i] - 0.985 * g2[i] < eps }
+
+        // نشيل النقاط الصغيرة المتناثرة حتى يطلع الستنسل نظيف.
+        removeSpecks(&out, w, h, minArea: max(6, Int(18 * scale * scale)))
+        out = dilate(out, w, h, Int((s.thickness * 3 * Double(scale)).rounded()))
+
+        if s.shading > 0 {
+            let bayer: [Float] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map { $0 / 16 }
+            let cut = Float(0.25 + 0.45 * s.shading)
+            for y in 0..<h {
+                for x in 0..<w {
+                    let i = y * w + x
+                    let tone = min(1, max(0, (cut - g1[i]) / cut))
+                    if tone > bayer[(y & 3) * 4 + (x & 3)] + 0.05 { out[i] = true }
+                }
+            }
+        }
+        return out
+    }
+
+    private static func removeSpecks(_ b: inout [Bool], _ w: Int, _ h: Int, minArea: Int) {
+        var seen = [Bool](repeating: false, count: b.count)
+        var stack: [Int] = []
+        var component: [Int] = []
+        for start in 0..<b.count where b[start] && !seen[start] {
+            stack.removeAll(keepingCapacity: true)
+            component.removeAll(keepingCapacity: true)
+            stack.append(start)
+            seen[start] = true
+            while let p = stack.popLast() {
+                component.append(p)
+                let x = p % w, y = p / w
+                for dy in -1...1 {
+                    let yy = y + dy
+                    if yy < 0 || yy >= h { continue }
+                    for dx in -1...1 {
+                        let xx = x + dx
+                        if xx < 0 || xx >= w || (dx == 0 && dy == 0) { continue }
+                        let q = yy * w + xx
+                        if b[q] && !seen[q] { seen[q] = true; stack.append(q) }
+                    }
+                }
+            }
+            if component.count < minArea { for p in component { b[p] = false } }
+        }
+    }
+
+    private static func dilate(_ b: [Bool], _ w: Int, _ h: Int, _ r: Int) -> [Bool] {
+        guard r > 0 else { return b }
+        var tmp = [Bool](repeating: false, count: b.count)
+        for y in 0..<h {
+            let row = y * w
+            for x in 0..<w where b[row + x] {
+                for xx in max(0, x - r)...min(w - 1, x + r) { tmp[row + xx] = true }
+            }
+        }
+        var out = [Bool](repeating: false, count: b.count)
+        for y in 0..<h {
+            for x in 0..<w where tmp[y * w + x] {
+                for yy in max(0, y - r)...min(h - 1, y + r) { out[yy * w + x] = true }
+            }
         }
         return out
     }
@@ -145,30 +184,6 @@ enum Filters {
                             o[y * w + x] = acc
                         }
                     }
-                }
-            }
-        }
-        return out
-    }
-
-    // MARK: - التظليل (Floyd–Steinberg)
-
-    private static func dither(_ g: [UInt8], _ w: Int, _ h: Int, _ threshold: Double) -> [Bool] {
-        let shift = Float((threshold - 0.5) * 255)
-        var v = g.map { $0 < 250 ? Float($0) - shift : Float($0) }
-        var out = [Bool](repeating: false, count: g.count)
-        for y in 0..<h {
-            for x in 0..<w {
-                let i = y * w + x
-                let old = v[i]
-                let black = old < 128
-                out[i] = black
-                let e = old - (black ? 0 : 255)
-                if x + 1 < w { v[i + 1] += e * 7 / 16 }
-                if y + 1 < h {
-                    if x > 0 { v[i + w - 1] += e * 3 / 16 }
-                    v[i + w] += e * 5 / 16
-                    if x + 1 < w { v[i + w + 1] += e / 16 }
                 }
             }
         }

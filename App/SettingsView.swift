@@ -5,12 +5,13 @@ struct SettingsView: View {
     @EnvironmentObject private var printer: PrinterManager
     @EnvironmentObject private var cloud: CloudLibrary
     @AppStorage("printMode") private var mode: PrintMode = .mhtLegacy
-    @AppStorage("density") private var density: Density = .low
+    @AppStorage("density") private var density: Density = .normal
     @State private var askPassword = false
     @State private var password = ""
     @State private var problem: String?
     @State private var adminConfig: LibraryConfig?
     @State private var copied = false
+    @State private var heatWarning = false
 
     var body: some View {
         Form {
@@ -49,10 +50,8 @@ struct SettingsView: View {
                     password = ""
                     askPassword = true
                 } label: {
-                    Label("دخول المدير", systemImage: "lock.fill")
+                    Label("Admin", systemImage: "lock.fill")
                 }
-            } footer: {
-                Text("للمدير بس: رفع الصور وتعديل الأقسام والبانر.")
             }
 
             if printer.connectedName != nil {
@@ -74,10 +73,21 @@ struct SettingsView: View {
 
             Section {
                 LabeledContent("الإصدار", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "-")
+            } footer: {
+                Text("Designed by Rawsam Tattoo")
+                    .font(.footnote.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 8)
             }
         }
         .navigationTitle("الإعدادات")
-        .alert("كلمة سر المدير", isPresented: $askPassword) {
+        .onChange(of: density) { _, new in if new == .thick { heatWarning = true } }
+        .alert("تنبيه", isPresented: $heatWarning) {
+            Button("تمام", role: .cancel) {}
+        } message: {
+            Text(darkHeatWarning)
+        }
+        .alert("Admin", isPresented: $askPassword) {
             SecureField("كلمة السر", text: $password)
             Button("دخول", action: checkPassword)
             Button("إلغاء", role: .cancel) {}
