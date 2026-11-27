@@ -1,94 +1,600 @@
 import SwiftUI
+import PhotosUI
+
+enum Tool: String, CaseIterable, Identifiable {
+    case style, size, crop, rotate, mirror, copy, text, add, heat
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .style: return "الصورة"
+        case .size: return "الحجم"
+        case .crop: return "قص"
+        case .rotate: return "تدوير"
+        case .mirror: return "مرآة"
+        case .copy: return "نسخ"
+        case .text: return "نص"
+        case .add: return "إضافة"
+        case .heat: return "الحرارة"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .style: return "wand.and.stars"
+        case .size: return "arrow.up.left.and.arrow.down.right"
+        case .crop: return "crop"
+        case .rotate: return "rotate.right"
+        case .mirror: return "arrow.left.and.right.righttriangle.left.righttriangle.right"
+        case .copy: return "plus.square.on.square"
+        case .text: return "textformat"
+        case .add: return "photo.badge.plus"
+        case .heat: return "flame"
+        }
+    }
+    var needsSelection: Bool { ![.text, .add, .heat].contains(self) }
+}
 
 struct EditorView: View {
-    let design: Design
+    let source: DesignSource
     @EnvironmentObject private var printer: PrinterManager
+    @StateObject private var model = EditorModel()
     @AppStorage("printMode") private var mode: PrintMode = .mhtLegacy
     @AppStorage("density") private var density: Density = .low
-    @State private var source: UIImage?
-    @State private var settings = EditSettings()
-    @State private var bitmap: Bitmap?
-    @State private var preview: UIImage?
-    @State private var working = true
+    @State private var panel: Tool?
+    @State private var loading = true
+    @State private var rendering = false
+    @State private var showPrinters = false
+    @State private var cropping = false
+    @State private var textSheet = false
+    @State private var addPick: PhotosPickerItem?
 
-    private struct RenderKey: Equatable {
-        let settings: EditSettings
-        let width: Int
-        let loaded: Bool
+    var body: some View {
+        VStack(spacing: 0) {
+            infoBar
+            CanvasView(model: model)
+                .padding(.horizontal, 6)
+                .overlay { if loading { ProgressView().controlSize(.large) } }
+            if let panel { panelView(panel) }
+            toolbar
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("تعديل")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: printNow) {
+                    if rendering { ProgressView() } else {
+                        Label("اطبع", systemImage: "printer.fill")
+                            .labelStyle(.titleAndIcon)
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color.brand))
+                    }
+                }
+                .disabled(model.layers.isEmpty || rendering || printer.isPrinting)
+            }
+        }
+        .overlay { if printer.progress != nil { printingCard } }
+        .sheet(isPresented: $showPrinters) { PrinterPicker() }
+        .sheet(isPresented: $cropping) {
+            if let layer = model.selected {
+                CropView(image: layer.source, rect: layer.crop) { rect in model.update { $0.crop = rect } }
+            }
+        }
+        .sheet(isPresented: $textSheet) {
+            TextSheet(initial: model.selected?.text ?? "") { text in
+                if model.selected?.text != nil { model.updateText(text) } else { model.addText(text) }
+            }
+            .presentationDetents([.height(230)])
+        }
+        .onChange(of: addPick) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
+                    model.add(image: image)
+                }
+                addPick = nil
+            }
+        }
+        .task {
+            guard model.layers.isEmpty else { return }
+            if let image = await source.load() { model.add(image: image) }
+            loading = false
+        }
+        .task(id: model.layers.map(\.key)) {
+            try? await Task.sleep(for: .milliseconds(200))
+            if Task.isCancelled { return }
+            await model.processPending()
+        }
+    }
+
+    // MARK: - الشريط العلوي
+
+    private var infoBar: some View {
+        HStack(spacing: 14) {
+            if let layer = model.selected {
+                let b = model.bounds(layer)
+                value("x", b.minX)
+                value("y", b.minY)
+                value("w", layer.widthMM)
+                value("h", layer.heightMM)
+                Text("r:\(Int(layer.rotation.rounded()))°")
+            } else {
+                Text("A4 · 210 × 297 mm")
+            }
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .background(Color.white)
+        .environment(\.layoutDirection, .leftToRight)
+        .onTapGesture { if model.selected != nil { panel = .size } }
+    }
+
+    private func value(_ name: String, _ v: CGFloat) -> some View {
+        Text("\(name):\(Double(v), specifier: "%.1f")")
+    }
+
+    // MARK: - الأدوات
+
+    private var toolbar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(Tool.allCases) { tool in
+                    if tool == .add {
+                        PhotosPicker(selection: $addPick, matching: .images) { toolLabel(tool) }
+                    } else {
+                        Button { tap(tool) } label: { toolLabel(tool) }
+                            .disabled(tool.needsSelection && model.selected == nil)
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+        }
+        .padding(.vertical, 8)
+        .background(Color.white)
+    }
+
+    private func toolLabel(_ tool: Tool) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: tool.icon).font(.system(size: 20))
+            Text(tool.title).font(.caption2)
+        }
+        .frame(width: 62, height: 48)
+        .foregroundStyle(panel == tool ? Color.brand : Color.primary)
+        .background(RoundedRectangle(cornerRadius: 10).fill(panel == tool ? Color.brand.opacity(0.1) : .clear))
+    }
+
+    private func tap(_ tool: Tool) {
+        switch tool {
+        case .style, .size, .heat: withAnimation(.snappy) { panel = panel == tool ? nil : tool }
+        case .crop: cropping = true
+        case .rotate: model.rotate90()
+        case .mirror: model.update { $0.mirrored.toggle() }
+        case .copy: model.duplicate()
+        case .text: textSheet = true
+        case .add: break
+        }
+    }
+
+    @ViewBuilder
+    private func panelView(_ tool: Tool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch tool {
+            case .style: stylePanel
+            case .size: sizePanel
+            case .heat: heatPanel
+            default: EmptyView()
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private var styleBinding: Binding<ImageStyle> {
+        Binding(get: { model.selected?.style ?? ImageStyle() }, set: { s in model.update { $0.style = s } })
+    }
+
+    @ViewBuilder
+    private var stylePanel: some View {
+        if model.selected == nil {
+            Text("اختار صورة من الورقة").foregroundStyle(.secondary)
+        } else if model.selected?.text != nil {
+            Text("النص يطبع أسود. غيّر حجمه بأصبعين أو من «الحجم».").foregroundStyle(.secondary)
+        } else {
+            Picker("", selection: styleBinding.mode) {
+                ForEach(ImageMode.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            switch styleBinding.wrappedValue.mode {
+            case .lines:
+                slider("التفاصيل", styleBinding.detail)
+                slider("غمقان الخط", styleBinding.weight)
+                slider("تعبئة الغامق", styleBinding.fill)
+            case .mono, .dither:
+                slider("الغمقان", styleBinding.threshold, 0.1...0.9)
+            }
+        }
+    }
+
+    private func slider(_ title: String, _ value: Binding<Double>, _ range: ClosedRange<Double> = 0...1) -> some View {
+        HStack {
+            Text(title).frame(width: 88, alignment: .leading)
+            Slider(value: value, in: range)
+        }
+        .font(.subheadline)
+    }
+
+    private var widthBinding: Binding<Double> {
+        Binding(get: { Double(model.selected?.widthMM ?? 0) },
+                set: { v in model.update { $0.widthMM = CGFloat(max(5, min(400, v))) } })
+    }
+
+    private var heightBinding: Binding<Double> {
+        Binding(get: { Double(model.selected?.heightMM ?? 0) },
+                set: { v in model.update { $0.widthMM = CGFloat(max(5, min(400, v))) / max($0.aspect, 0.01) } })
+    }
+
+    @ViewBuilder
+    private var sizePanel: some View {
+        HStack(spacing: 8) {
+            Text("العرض")
+            TextField("", value: widthBinding, format: .number.precision(.fractionLength(0...1)))
+                .keyboardType(.decimalPad).textFieldStyle(.roundedBorder).frame(width: 70)
+            Text("الارتفاع")
+            TextField("", value: heightBinding, format: .number.precision(.fractionLength(0...1)))
+                .keyboardType(.decimalPad).textFieldStyle(.roundedBorder).frame(width: 70)
+            Text("ملم").foregroundStyle(.secondary)
+        }
+        .font(.subheadline)
+        Slider(value: widthBinding, in: 10...210)
+        HStack {
+            Button("بالنص") { model.update { $0.center.x = EditorModel.pageW / 2 } }
+            Button("لأعلى الورقة") { model.update { $0.center.y = model.bounds($0).height / 2 + 5 } }
+            Button("بعرض الورقة") { model.update { $0.widthMM = 200; $0.center.x = EditorModel.pageW / 2 } }
+        }
+        .buttonStyle(.bordered)
+        .font(.subheadline)
+    }
+
+    @ViewBuilder
+    private var heatPanel: some View {
+        Text("حرارة الطباعة").font(.subheadline.bold())
+        Picker("", selection: $density) {
+            ForEach(Density.allCases) { Text($0.title).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .disabled(mode == .escpos)
+        Text("إذا طلعت الخطوط باهتة زيد الحرارة، وإذا انتشرت قللها.")
+            .font(.caption).foregroundStyle(.secondary)
+    }
+
+    // MARK: - الطباعة
+
+    private var printingCard: some View {
+        VStack(spacing: 14) {
+            Text("أطبع…").font(.headline)
+            ProgressView(value: printer.progress ?? 0).tint(.brand)
+            Button("إيقاف", role: .destructive) { printer.cancelPrint() }
+                .buttonStyle(.bordered)
+        }
+        .padding(24)
+        .frame(width: 260)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .shadow(radius: 20)
+    }
+
+    private func printNow() {
+        guard printer.isReady else { showPrinters = true; return }
+        rendering = true
+        Task {
+            let bitmap = await model.renderForPrint(headWidth: mode.widthDots)
+            rendering = false
+            if let bitmap { printer.send(PrinterProtocol.job(bitmap, mode: mode, density: density)) }
+        }
+    }
+}
+
+// MARK: - الورقة
+
+struct CanvasView: View {
+    @ObservedObject var model: EditorModel
+    @State private var dragStart: CGPoint?
+    @State private var pinchStart: (width: CGFloat, rotation: Double)?
+    @State private var resizeStart: CGFloat?
+    private let ruler: CGFloat = 22
+
+    var body: some View {
+        GeometryReader { geo in
+            let s = max(0.1, min((geo.size.width - ruler - 4) / EditorModel.pageW,
+                                 (geo.size.height - ruler - 8) / EditorModel.pageH))
+            let size = CGSize(width: EditorModel.pageW * s, height: EditorModel.pageH * s)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 0) {
+                    Color.clear.frame(width: ruler, height: ruler)
+                    Ruler(vertical: false, scale: s, length: EditorModel.pageW)
+                        .frame(width: size.width, height: ruler)
+                }
+                HStack(alignment: .top, spacing: 0) {
+                    Ruler(vertical: true, scale: s, length: EditorModel.pageH)
+                        .frame(width: ruler, height: size.height)
+                    page(s).frame(width: size.width, height: size.height)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        // الورقة مثل الورق الحقيقي: الصفر باليسار.
+        .environment(\.layoutDirection, .leftToRight)
+    }
+
+    private func page(_ s: CGFloat) -> some View {
+        ZStack {
+            Color.white
+                .contentShape(Rectangle())
+                .onTapGesture { model.selectedID = nil }
+            ForEach(model.layers) { layer in
+                layerView(layer, s)
+            }
+        }
+        .clipped()
+        .shadow(color: .black.opacity(0.12), radius: 6)
+        .coordinateSpace(name: "page")
+        .simultaneousGesture(
+            MagnifyGesture().simultaneously(with: RotateGesture())
+                .onChanged { value in
+                    guard let i = model.selectedIndex else { return }
+                    if pinchStart == nil { pinchStart = (model.layers[i].widthMM, model.layers[i].rotation) }
+                    guard let start = pinchStart else { return }
+                    if let m = value.first?.magnification {
+                        model.layers[i].widthMM = min(400, max(5, start.width * m))
+                    }
+                    if let r = value.second?.rotation {
+                        model.layers[i].rotation = start.rotation + r.degrees
+                    }
+                }
+                .onEnded { _ in
+                    pinchStart = nil
+                    model.snapRotation()
+                }
+        )
+    }
+
+    private func layerView(_ layer: Layer, _ s: CGFloat) -> some View {
+        let selected = layer.id == model.selectedID
+        let w = max(1, layer.widthMM * s), h = max(1, layer.heightMM * s)
+        return ZStack {
+            if let image = model.processed[layer.id]?.image {
+                Image(uiImage: image).resizable()
+            } else {
+                Image(uiImage: layer.source).resizable().opacity(0.3)
+                ProgressView()
+            }
+        }
+        .frame(width: w, height: h)
+        .scaleEffect(x: layer.mirrored ? -1 : 1, y: 1)
+        .contentShape(Rectangle())
+        .onTapGesture { model.selectedID = layer.id }
+        .gesture(
+            DragGesture(coordinateSpace: .named("page"))
+                .onChanged { v in
+                    guard let i = model.layers.firstIndex(where: { $0.id == layer.id }) else { return }
+                    if model.selectedID != layer.id { model.selectedID = layer.id }
+                    if dragStart == nil { dragStart = model.layers[i].center }
+                    guard let start = dragStart else { return }
+                    model.layers[i].center = CGPoint(x: start.x + v.translation.width / s,
+                                                     y: start.y + v.translation.height / s)
+                }
+                .onEnded { _ in dragStart = nil }
+        )
+        .overlay {
+            if selected {
+                Rectangle()
+                    .stroke(Color.brand, style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if selected {
+                handle("xmark")
+                    .offset(x: -14, y: -14)
+                    .onTapGesture { model.delete() }
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if selected {
+                handle("arrow.up.left.and.arrow.down.right")
+                    .offset(x: 14, y: 14)
+                    .gesture(resize(layer, s))
+            }
+        }
+        .rotationEffect(.degrees(layer.rotation))
+        .position(x: layer.center.x * s, y: layer.center.y * s)
+    }
+
+    private func handle(_ icon: String) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 26, height: 26)
+            .background(Circle().fill(Color.black))
+            .contentShape(Circle())
+    }
+
+    private func resize(_ layer: Layer, _ s: CGFloat) -> some Gesture {
+        DragGesture(coordinateSpace: .named("page"))
+            .onChanged { v in
+                guard let i = model.layers.firstIndex(where: { $0.id == layer.id }) else { return }
+                if resizeStart == nil { resizeStart = model.layers[i].widthMM }
+                guard let start = resizeStart else { return }
+                let c = CGPoint(x: layer.center.x * s, y: layer.center.y * s)
+                let d0 = hypot(v.startLocation.x - c.x, v.startLocation.y - c.y)
+                let d1 = hypot(v.location.x - c.x, v.location.y - c.y)
+                guard d0 > 1 else { return }
+                model.layers[i].widthMM = min(400, max(5, start * d1 / d0))
+            }
+            .onEnded { _ in resizeStart = nil }
+    }
+}
+
+struct Ruler: View {
+    let vertical: Bool
+    let scale: CGFloat
+    let length: CGFloat
+
+    var body: some View {
+        Canvas { ctx, size in
+            let labelEvery = scale * 10 >= 16 ? 10 : 20
+            for mm in 0...Int(length) {
+                let tick: CGFloat
+                if mm % 10 == 0 { tick = 9 } else if mm % 5 == 0 { tick = 6 } else if scale >= 1.4 { tick = 3 } else { continue }
+                let p = CGFloat(mm) * scale
+                var path = Path()
+                if vertical {
+                    path.move(to: CGPoint(x: size.width, y: p))
+                    path.addLine(to: CGPoint(x: size.width - tick, y: p))
+                } else {
+                    path.move(to: CGPoint(x: p, y: size.height))
+                    path.addLine(to: CGPoint(x: p, y: size.height - tick))
+                }
+                ctx.stroke(path, with: .color(.gray), lineWidth: 0.6)
+                if mm % labelEvery == 0 {
+                    let label = Text("\(mm)").font(.system(size: 7)).foregroundColor(.gray)
+                    if vertical {
+                        ctx.draw(label, at: CGPoint(x: 1, y: p + 1), anchor: .topLeading)
+                    } else {
+                        ctx.draw(label, at: CGPoint(x: p + 1, y: 1), anchor: .topLeading)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - القص
+
+struct CropView: View {
+    let image: UIImage
+    @State var rect: NormRect
+    let onDone: (NormRect) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var start: NormRect?
+
+    var body: some View {
+        NavigationStack {
+            GeometryReader { geo in
+                let fit = fitted(in: geo.size)
+                ZStack(alignment: .topLeading) {
+                    Image(uiImage: image).resizable().frame(width: fit.width, height: fit.height)
+                    overlay(fit)
+                }
+                .frame(width: fit.width, height: fit.height)
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            }
+            .padding(24)
+            .background(Color.black)
+            .environment(\.layoutDirection, .leftToRight)
+            .navigationTitle("قص الصورة")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("إلغاء") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("تم") { onDone(rect); dismiss() }.bold() }
+                ToolbarItem(placement: .bottomBar) { Button("الصورة كاملة") { rect = .full } }
+            }
+        }
+    }
+
+    private func fitted(in size: CGSize) -> CGSize {
+        let s = min(size.width / max(image.size.width, 1), size.height / max(image.size.height, 1))
+        return CGSize(width: image.size.width * s, height: image.size.height * s)
+    }
+
+    private func overlay(_ size: CGSize) -> some View {
+        let r = CGRect(x: rect.x * size.width, y: rect.y * size.height, width: rect.w * size.width, height: rect.h * size.height)
+        return ZStack(alignment: .topLeading) {
+            Path { p in
+                p.addRect(CGRect(origin: .zero, size: size))
+                p.addRect(r)
+            }
+            .fill(Color.black.opacity(0.55), style: FillStyle(eoFill: true))
+            .allowsHitTesting(false)
+            Rectangle()
+                .stroke(Color.white, lineWidth: 2)
+                .contentShape(Rectangle())
+                .frame(width: r.width, height: r.height)
+                .position(x: r.midX, y: r.midY)
+                .gesture(drag(size) { s, dx, dy in
+                    var n = s
+                    n.x = min(max(0, s.x + dx), 1 - s.w)
+                    n.y = min(max(0, s.y + dy), 1 - s.h)
+                    return n
+                })
+            ForEach(0..<4, id: \.self) { corner in
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 26, height: 26)
+                    .position(x: corner % 2 == 0 ? r.minX : r.maxX, y: corner < 2 ? r.minY : r.maxY)
+                    .gesture(drag(size) { s, dx, dy in resizeCorner(corner, s, dx, dy) })
+            }
+        }
+    }
+
+    private func resizeCorner(_ corner: Int, _ s: NormRect, _ dx: Double, _ dy: Double) -> NormRect {
+        var minX = s.x, minY = s.y, maxX = s.x + s.w, maxY = s.y + s.h
+        let gap = 0.05
+        if corner % 2 == 0 { minX = min(max(0, minX + dx), maxX - gap) } else { maxX = max(min(1, maxX + dx), minX + gap) }
+        if corner < 2 { minY = min(max(0, minY + dy), maxY - gap) } else { maxY = max(min(1, maxY + dy), minY + gap) }
+        return NormRect(x: minX, y: minY, w: maxX - minX, h: maxY - minY)
+    }
+
+    private func drag(_ size: CGSize, _ apply: @escaping (NormRect, Double, Double) -> NormRect) -> some Gesture {
+        DragGesture()
+            .onChanged { v in
+                if start == nil { start = rect }
+                guard let s = start else { return }
+                rect = apply(s, v.translation.width / size.width, v.translation.height / size.height)
+            }
+            .onEnded { _ in start = nil }
+    }
+}
+
+// MARK: - النص
+
+struct TextSheet: View {
+    @State var text: String
+    let onDone: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var focused: Bool
+
+    init(initial: String, onDone: @escaping (String) -> Void) {
+        _text = State(initialValue: initial)
+        self.onDone = onDone
     }
 
     var body: some View {
-        Form {
-            Section("معاينة الطباعة (عرض الورقة 21 سم)") {
-                ZStack {
-                    Color.white
-                    if let preview { Image(uiImage: preview).resizable().scaledToFit() }
-                    if working { ProgressView().tint(.black) }
-                }
-                .frame(height: 320)
-                // المعاينة صورة، فلا تنقلب مع اتجاه الواجهة.
-                .environment(\.layoutDirection, .leftToRight)
-                if let bitmap {
-                    Text("طول الطباعة: \(Double(bitmap.height) / 80, specifier: "%.1f") سم")
-                        .foregroundStyle(.secondary)
-                }
+        NavigationStack {
+            Form {
+                TextField("اكتب النص", text: $text, axis: .vertical)
+                    .lineLimit(1...4)
+                    .focused($focused)
             }
-            Section("التعديل") {
-                slider("العرض: \(Int(settings.widthMM)) ملم", value: $settings.widthMM, range: 20...208, step: 1)
-                slider("الغمقان", value: $settings.threshold, range: 0.1...0.9, step: 0.01)
-                HStack {
-                    Button("تدوير", systemImage: "rotate.right") { settings.rotation = (settings.rotation + 90) % 360 }
-                    Spacer()
-                    Button("الأصلي", systemImage: "arrow.uturn.backward") { settings = EditSettings() }
-                }
-                .buttonStyle(.bordered)
-                Toggle("قلب كالمرآة", isOn: $settings.mirrored)
-                Toggle("استخراج الخطوط من صورة", isOn: $settings.outline)
-                Toggle("تظليل (للتدرجات)", isOn: $settings.dither)
-                Toggle("عكس الألوان", isOn: $settings.inverted)
-            }
-            Section("الطباعة") {
-                Picker("كثافة الحرارة", selection: $density) {
-                    ForEach(Density.allCases) { Text($0.title).tag($0) }
-                }
-                .disabled(mode == .escpos)
-                if let progress = printer.progress {
-                    ProgressView(value: progress)
-                    Button("إيقاف", role: .destructive) { printer.cancelPrint() }
-                } else {
-                    Button("اطبع", systemImage: "printer.fill") {
-                        if let bitmap { printer.send(PrinterProtocol.job(bitmap, mode: mode, density: density)) }
+            .navigationTitle("نص")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("إلغاء") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("تم") {
+                        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !clean.isEmpty { onDone(clean) }
+                        dismiss()
                     }
-                    .disabled(!printer.isReady || bitmap == nil || working)
+                    .bold()
                 }
-                Text(printer.status).foregroundStyle(.secondary)
             }
-        }
-        .navigationTitle(design.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .task { source = UIImage(contentsOfFile: design.url.path); if source == nil { working = false } }
-        .task(id: RenderKey(settings: settings, width: mode.widthDots, loaded: source != nil)) {
-            guard let source else { return }
-            working = true
-            try? await Task.sleep(for: .milliseconds(150))
-            if Task.isCancelled { return }
-            let current = settings
-            let width = mode.widthDots
-            let result = await Task.detached(priority: .userInitiated) { () -> (Bitmap, UIImage?)? in
-                guard let b = ImageProcessor.render(source, settings: current, headWidth: width) else { return nil }
-                return (b, ImageProcessor.preview(b))
-            }.value
-            if Task.isCancelled { return }
-            bitmap = result?.0
-            preview = result?.1
-            working = false
-        }
-    }
-
-    private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double) -> some View {
-        VStack(alignment: .leading) {
-            Text(title)
-            Slider(value: value, in: range, step: step)
+            .onAppear { focused = true }
         }
     }
 }

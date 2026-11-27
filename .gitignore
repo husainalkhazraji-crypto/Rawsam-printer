@@ -3,3 +3,4 @@ Payload/
 *.ipa
 *.xcodeproj
 .DS_Store
+App/Assets.xcassets/

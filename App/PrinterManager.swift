@@ -6,20 +6,18 @@ struct FoundDevice: Identifiable {
     let name: String
     var rssi: Int
     var id: UUID { peripheral.identifier }
-    var looksLikePrinter: Bool {
-        let n = name.uppercased()
-        return ["MHT", "P19", "HERCULES", "PRINTER", "TATTOO", "GT-", "IMP-"].contains { n.contains($0) }
-    }
 }
 
 final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
-    @Published var devices: [FoundDevice] = []
-    @Published var status = "غير متصل"
-    @Published var connectedName: String?
+    @Published private(set) var devices: [FoundDevice] = []
+    @Published private(set) var connectedName: String?
+    @Published private(set) var isConnecting = false
+    @Published private(set) var bluetoothOff = false
     @Published var writeTargets: [CBCharacteristic] = []
     @Published var selectedTarget: CBCharacteristic?
-    @Published var progress: Double?
-    @Published var log: [String] = []
+    @Published private(set) var progress: Double?
+    @Published private(set) var lastMessage: String?
+    @Published private(set) var log: [String] = []
 
     private var central: CBCentralManager!
     private var current: CBPeripheral?
@@ -28,11 +26,14 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
     private var awaitingResponse = false
     private var wantsScan = false
 
+    private let lastIDKey = "lastPrinterID"
+    private let lastNameKey = "lastPrinterName"
+
     /// قنوات الكتابة الشائعة بطابعات البلوتوث الصينية، حسب الأولوية.
     private let preferred = ["FF02", "49535343-8841-43F4-A8D4-ECBE34729BB3", "AE01",
                              "BEF8D6C9-9C21-4C9E-B632-BD58C1009F9F", "FFF2", "FFE1", "2AF1"]
 
-    var isReady: Bool { selectedTarget != nil }
+    var isReady: Bool { selectedTarget != nil && current != nil }
     var isPrinting: Bool { progress != nil }
 
     override init() {
@@ -40,37 +41,60 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
+    func looksLikePrinter(_ device: FoundDevice) -> Bool {
+        let n = device.name.uppercased()
+        if n == UserDefaults.standard.string(forKey: lastNameKey)?.uppercased() { return true }
+        return ["MHT", "P19", "HERCULES", "PRINTER", "TATTOO", "STENCIL", "GT-", "IMP-", "PRT"].contains { n.contains($0) }
+    }
+
     private func note(_ text: String) {
         log.append(text)
         if log.count > 300 { log.removeFirst(log.count - 300) }
     }
+
+    // MARK: - البحث والاتصال
 
     func scan() {
         wantsScan = true
         guard central.state == .poweredOn else { return }
         devices.removeAll()
         central.scanForPeripherals(withServices: nil)
-        status = "أدور على الأجهزة…"
     }
 
     func stopScan() {
         wantsScan = false
         if central.state == .poweredOn { central.stopScan() }
-        if connectedName == nil { status = "غير متصل" }
     }
 
     func connect(_ device: FoundDevice) {
-        central.stopScan()
-        wantsScan = false
-        disconnect()
-        current = device.peripheral
-        current?.delegate = self
-        status = "أتصل بـ \(device.name)…"
-        note("connect \(device.name)")
-        central.connect(device.peripheral)
+        stopScan()
+        disconnect(forget: false)
+        UserDefaults.standard.set(device.id.uuidString, forKey: lastIDKey)
+        UserDefaults.standard.set(device.name, forKey: lastNameKey)
+        open(device.peripheral)
     }
 
-    func disconnect() {
+    private func open(_ peripheral: CBPeripheral) {
+        current = peripheral
+        peripheral.delegate = self
+        isConnecting = true
+        note("connect \(peripheral.name ?? "?")")
+        central.connect(peripheral)
+    }
+
+    /// يرجع يتصل بآخر طابعة تلقائياً من تتشغل.
+    private func reconnectLast() {
+        guard current == nil, central.state == .poweredOn,
+              let saved = UserDefaults.standard.string(forKey: lastIDKey),
+              let uuid = UUID(uuidString: saved),
+              let peripheral = central.retrievePeripherals(withIdentifiers: [uuid]).first else { return }
+        open(peripheral)
+    }
+
+    func disconnect(forget: Bool) {
+        if forget {
+            UserDefaults.standard.removeObject(forKey: lastIDKey)
+        }
         if let p = current { central.cancelPeripheralConnection(p) }
         reset()
     }
@@ -78,14 +102,16 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
     private func reset() {
         current = nil
         connectedName = nil
+        isConnecting = false
         writeTargets = []
         selectedTarget = nil
         progress = nil
         outgoing = Data()
         offset = 0
         awaitingResponse = false
-        status = "غير متصل"
     }
+
+    // MARK: - الإرسال
 
     func send(_ data: Data) {
         guard current != nil, selectedTarget != nil, !isPrinting else { return }
@@ -93,15 +119,17 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
         offset = 0
         awaitingResponse = false
         progress = 0
-        status = "أرسل للطابعة…"
+        lastMessage = nil
         note("send \(data.count) bytes")
         pump()
     }
 
     func cancelPrint() {
         guard isPrinting else { return }
-        // قطع الاتصال أضمن طريقة لإيقاف مهمة بنصها.
-        disconnect()
+        // قطع الاتصال أضمن طريقة لإيقاف مهمة بنصها، وبعدها نرجع نتصل.
+        disconnect(forget: false)
+        lastMessage = "انلغت الطباعة"
+        reconnectLast()
     }
 
     private func pump() {
@@ -120,13 +148,13 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
         }
         if !awaitingResponse {
             progress = nil
-            status = "خلص الإرسال"
+            lastMessage = "خلص الإرسال للطابعة"
             note("send complete")
         }
     }
 
     func report() -> String {
-        var lines = ["Washm diagnostic", "device: \(connectedName ?? "-")"]
+        var lines = ["Rawsam printer diagnostic", "device: \(connectedName ?? "-")"]
         for service in current?.services ?? [] {
             lines.append("service \(service.uuid.uuidString)")
             for c in service.characteristics ?? [] {
@@ -140,11 +168,12 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
     // MARK: - CBCentralManagerDelegate
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        switch central.state {
-        case .poweredOn: if wantsScan { scan() }
-        case .poweredOff: reset(); status = "شغّل البلوتوث"
-        case .unauthorized: reset(); status = "اسمح للتطبيق بالبلوتوث من الإعدادات"
-        default: break
+        bluetoothOff = central.state == .poweredOff || central.state == .unauthorized
+        if central.state == .poweredOn {
+            if wantsScan { scan() }
+            reconnectLast()
+        } else {
+            reset()
         }
     }
 
@@ -156,14 +185,16 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
             devices[i].rssi = RSSI.intValue
         } else {
             devices.append(FoundDevice(peripheral: peripheral, name: name, rssi: RSSI.intValue))
-            devices.sort { ($0.looksLikePrinter ? 1 : 0, $0.rssi) > ($1.looksLikePrinter ? 1 : 0, $1.rssi) }
+            devices.sort { a, b in
+                let pa = looksLikePrinter(a), pb = looksLikePrinter(b)
+                return pa != pb ? pa : a.rssi > b.rssi
+            }
         }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard peripheral == current else { return }
-        connectedName = peripheral.name ?? "طابعة"
-        status = "متصل، أفحص القنوات…"
+        connectedName = peripheral.name ?? UserDefaults.standard.string(forKey: lastNameKey) ?? "طابعة"
         peripheral.discoverServices(nil)
     }
 
@@ -171,13 +202,15 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
         guard peripheral == current else { return }
         note("connect failed: \(error?.localizedDescription ?? "?")")
         reset()
-        status = "فشل الاتصال"
+        lastMessage = "فشل الاتصال بالطابعة"
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard peripheral == current else { return }
         note("disconnected: \(error?.localizedDescription ?? "-")")
         reset()
+        // انفصلت وحدها (انطفت أو بعدت): ننتظرها ترجع.
+        reconnectLast()
     }
 
     // MARK: - CBPeripheralDelegate
@@ -200,11 +233,10 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
                 writeTargets.append(c)
             }
         }
-        // لا نغير القناة أثناء الطباعة.
         guard !isPrinting else { return }
         func rank(_ c: CBCharacteristic) -> Int { preferred.firstIndex(of: c.uuid.uuidString) ?? preferred.count }
         selectedTarget = writeTargets.min { rank($0) < rank($1) }
-        status = selectedTarget == nil ? "متصل، بس ما لكيت قناة طباعة" : "جاهزة للطباعة"
+        if selectedTarget != nil { isConnecting = false }
     }
 
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
@@ -216,7 +248,7 @@ final class PrinterManager: NSObject, ObservableObject, CBCentralManagerDelegate
             note("write error: \(error.localizedDescription)")
             progress = nil
             awaitingResponse = false
-            status = "خطأ بالإرسال"
+            lastMessage = "خطأ بالإرسال للطابعة"
             return
         }
         awaitingResponse = false
