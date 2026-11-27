@@ -11,21 +11,35 @@ from model import Generator
 out = 'model-out'
 os.makedirs(out, exist_ok=True)
 import json
-files = [f['path'] for f in json.load(urllib.request.urlopen('https://huggingface.co/api/models/OzzyGT/lineart/tree/main?recursive=1')) if f['type'] == 'file']
-print('repo files:', files)
-weights = {p.split('/')[0]: p for p in files if p.endswith('.pth') and '/' in p}
-styles = sorted(weights)
-print('styles:', styles)
+def tree(rev):
+    url = f'https://huggingface.co/api/models/OzzyGT/lineart/tree/{rev}?recursive=1'
+    return [f['path'] for f in json.load(urllib.request.urlopen(url)) if f['type'] == 'file']
 nets = {}
-for style in styles:
-    path = f'{style}.pth'
-    urllib.request.urlretrieve(f'https://huggingface.co/OzzyGT/lineart/resolve/main/{weights[style]}', path)
-    state = torch.load(path, map_location='cpu')
+def load(name, url, safetensors=False):
+    path = name + ('.safetensors' if safetensors else '.pth')
+    urllib.request.urlretrieve(url, path)
+    if safetensors:
+        from safetensors.torch import load_file
+        state = load_file(path)
+    else:
+        state = torch.load(path, map_location='cpu')
     state = {k.replace('module.', ''): v for k, v in state.items()}
     net = Generator(3, 1, 3)
     net.load_state_dict(state)
     net.eval()
-    nets[style] = net
+    nets[name] = net
+    print('loaded', name)
+
+load('main', 'https://huggingface.co/OzzyGT/lineart/resolve/main/lineart.safetensors', True)
+old = '883121337c69e2a653b16ad4f3ef9fda72b51dd2'
+try:
+    for p in tree(old):
+        if p.endswith('.pth') and '/' in p:
+            load(p.split('/')[0], f'https://huggingface.co/OzzyGT/lineart/resolve/{old}/{p}')
+except Exception as e:
+    print('old revision failed:', e)
+styles = list(nets)
+print('styles:', styles)
 
 # عيّنات للمقارنة
 samples = sorted(glob.glob('informative-drawings/examples/test/*'))[:4] + sorted(glob.glob('tools/samples/*'))

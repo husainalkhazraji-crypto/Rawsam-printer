@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths: [tools/convert_model.py, .github/workflows/model.yml]
+permissions:
+  contents: write
 jobs:
   convert:
     runs-on: ubuntu-latest
@@ -13,9 +15,12 @@ jobs:
         with:
           python-version: "3.11"
       - run: git clone --depth 1 https://github.com/carolineec/informative-drawings
-      - run: pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cpu && pip install coremltools==8.1 pillow numpy
+      - run: pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cpu && pip install coremltools==8.1 pillow numpy safetensors
       - run: python tools/convert_model.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: lineart-model
-          path: model-out
+      - name: Save results to the model-build branch
+        run: |
+          cd model-out
+          git init -q -b model-build
+          git add -A
+          git -c user.name="github-actions" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "AI model build ${{ github.sha }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" model-build
