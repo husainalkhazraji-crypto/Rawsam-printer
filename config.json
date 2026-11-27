@@ -1,59 +1,67 @@
 {
-  "bannerSeconds": 3,
-  "banners": [
+  "bannerSeconds" : 3,
+  "banners" : [
     {
-      "file": "32cdd77cdd5e47759389c936e8528ad8.jpg"
+      "file" : "32cdd77cdd5e47759389c936e8528ad8.jpg"
     },
     {
-      "file": "9cf34334f30b41a79d71bb85f0c03dfa.jpg"
+      "file" : "9cf34334f30b41a79d71bb85f0c03dfa.jpg"
+    },
+    {
+      "file" : "f127631d-a73c-4f4a-b228-9a5915d77cc0.jpg"
+    },
+    {
+      "file" : "f43164c6-8650-44c1-8c9c-f88c43a98169.jpg"
+    },
+    {
+      "file" : "a3542773-ebca-4f23-9a40-673c64e88d3c.jpg"
+    },
+    {
+      "file" : "5150e38f-4ca0-4212-bbf3-eba12494c7ab.jpg"
     }
   ],
-  "categories": [
+  "categories" : [
     {
-      "id": "small",
-      "items": [
+      "id" : "small",
+      "items" : [
         {
-          "file": "c115fbe46cac4fb98adaa716848849a7.jpg"
-        },
-        {
-          "file": "802262a85fe246f1a8f0e5583a864eff.jpg"
-        },
-        {
-          "file": "8f53389a133d4233aad99ce8a8281510.jpg"
+          "file" : "f3f2c6c0-399c-41c8-9e04-9c1ce4e684cf.jpg"
         }
       ],
-      "name": "وشمات صغيرة"
+      "name" : "وشمات صغيرة"
     },
     {
-      "id": "flowers",
-      "items": [
+      "id" : "flowers",
+      "items" : [
         {
-          "file": "9a98f02edf444769881983f699257ef8.jpg"
+          "file" : "9a98f02edf444769881983f699257ef8.jpg"
         },
         {
-          "file": "8b69a27c96fc4ada906693c712aa8f2c.jpg"
+          "file" : "8b69a27c96fc4ada906693c712aa8f2c.jpg"
         }
       ],
-      "name": "ورود"
+      "name" : "ورود"
     },
     {
-      "id": "practical",
-      "items": [],
-      "name": "وشم عملية"
+      "id" : "practical",
+      "items" : [
+
+      ],
+      "name" : "وشم عملية"
     },
     {
-      "id": "hearts",
-      "items": [
+      "id" : "hearts",
+      "items" : [
         {
-          "file": "8f53389a133d4233aad99ce8a8281510.jpg"
+          "file" : "8f53389a133d4233aad99ce8a8281510.jpg"
         },
         {
-          "file": "95dc0864d8754048b8c4666a599461c6.jpg"
+          "file" : "95dc0864d8754048b8c4666a599461c6.jpg"
         }
       ],
-      "name": "قلوب"
+      "name" : "قلوب"
     }
   ],
-  "passwordHash": "68978ee1a10133d4d0dc52d828fdf4e08277cada51699844b219f02aceaca47a",
-  "version": 1
+  "passwordHash" : "68978ee1a10133d4d0dc52d828fdf4e08277cada51699844b219f02aceaca47a",
+  "version" : 1
 }
