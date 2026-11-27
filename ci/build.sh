@@ -25,7 +25,10 @@ xcodebuild -project Washm.xcodeproj -scheme Washm -configuration Release -sdk ip
 echo "== تجهيز ملف IPA"
 mkdir -p Payload
 cp -R build/Build/Products/Release-iphoneos/Washm.app Payload/
-zip -qry Washm-iOS-unsigned.ipa Payload
+# أي اسم ملف غير إنگليزي داخل التطبيق يخرّب التثبيت بأدوات التوقيع.
+bad=$(cd Payload && find . -print | LC_ALL=C grep '[^ -~]' || true)
+if [ -n "$bad" ]; then echo "أسماء ملفات غير إنگليزية داخل التطبيق:"; echo "$bad"; exit 1; fi
+ditto -c -k --sequesterRsrc --keepParent Payload Washm-iOS-unsigned.ipa
 ls -la Washm-iOS-unsigned.ipa
 
 if [ -n "${GH_TOKEN:-}" ]; then

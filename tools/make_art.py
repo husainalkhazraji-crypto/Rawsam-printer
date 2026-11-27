@@ -24,19 +24,19 @@ ring(d,120,14); petals(d,8,120,520,.30,14); ring(d,560,12); petals(d,16,560,850,
 ring(d,890,12)
 for i in range(32):
     x,y=pol(985,2*math.pi*i/32); d.ellipse([x-45,y-45,x+45,y+45],outline=0,width=12)
-save(im,root+'/Designs/ماندالا/ماندالا.png')
+save(im,root+'/Designs/mandala/mandala.png')
 im,d=canvas()
 for R,n,k in [(1050,8,3),(720,6,1)]:
     p=[pol(R,2*math.pi*i/n-math.pi/2) for i in range(n)]
     d.line(p+[p[0]],fill=0,width=16,joint='curve')
     for i in range(n): d.line([p[i],p[(i+k)%n]],fill=0,width=10)
 ring(d,180,14)
-save(im,root+'/Designs/هندسي/نجمة هندسية.png')
+save(im,root+'/Designs/geometric/star.png')
 im,d=canvas()
 for j in range(5):
     petals(d,5+j,60+j*150,300+j*170,math.pi/(5+j)*.95,13,j*.45)
 ring(d,60,14)
-save(im,root+'/Designs/ورود/زهرة.png')
+save(im,root+'/Designs/flowers/flower.png')
 # icon: original mark (ink drop over rings), purple on dark
 im=Image.new('RGB',(1024,1024),(22,16,36)); d=ImageDraw.Draw(im)
 c=512
@@ -50,6 +50,9 @@ for k in range(121):
     pts.append((c+r*math.cos(a),cy+r*math.sin(a)))
 d.polygon(pts,fill=(150,100,245))
 d.arc([c-125,cy-125,c+125,cy+125],25,115,fill=(240,232,255),width=34)
+open(root+'/Designs/names.json','w',encoding='utf-8').write(json.dumps({
+    "mandala":"ماندالا","geometric":"هندسي","flowers":"ورود",
+    "mandala/mandala":"ماندالا","geometric/star":"نجمة هندسية","flowers/flower":"زهرة"},ensure_ascii=False,indent=1))
 os.makedirs(root+'/App/Assets.xcassets/AppIcon.appiconset',exist_ok=True)
 im.save(root+'/App/Assets.xcassets/AppIcon.appiconset/AppIcon.png')
 open(root+'/App/Assets.xcassets/Contents.json','w').write(json.dumps({"info":{"author":"xcode","version":1}}))

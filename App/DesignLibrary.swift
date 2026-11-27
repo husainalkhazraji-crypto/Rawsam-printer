@@ -5,8 +5,8 @@ struct Design: Identifiable, Hashable {
     let url: URL
     let category: String
     let isUserAdded: Bool
+    var name: String = ""
     var id: URL { url }
-    var name: String { url.deletingPathExtension().lastPathComponent }
 }
 
 /// المكتبة تجمع مصدرين:
@@ -17,6 +17,9 @@ final class DesignLibrary: ObservableObject {
     static let userCategory = "تصاميمي"
     private let extensions: Set<String> = ["png", "jpg", "jpeg", "heic", "webp"]
     private let files = FileManager.default
+    /// أسماء الملفات داخل التطبيق لازم تكون إنگليزية (الأسماء العربية تخرّب التثبيت)،
+    /// فالأسماء العربية الظاهرة تنكتب بـ Designs/names.json.
+    private var labels: [String: String] = [:]
 
     private var userFolder: URL {
         files.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Designs", isDirectory: true)
@@ -36,6 +39,8 @@ final class DesignLibrary: ObservableObject {
     func reload() {
         var found: [Design] = []
         if let bundled = Bundle.main.resourceURL?.appendingPathComponent("Designs") {
+            if let data = try? Data(contentsOf: bundled.appendingPathComponent("names.json")),
+               let map = try? JSONDecoder().decode([String: String].self, from: data) { labels = map }
             found += scan(bundled, isUserAdded: false)
         }
         try? files.createDirectory(at: userFolder, withIntermediateDirectories: true)
@@ -49,13 +54,21 @@ final class DesignLibrary: ObservableObject {
             if (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                 for file in (try? files.contentsOfDirectory(at: item, includingPropertiesForKeys: nil)) ?? []
                 where extensions.contains(file.pathExtension.lowercased()) {
-                    out.append(Design(url: file, category: item.lastPathComponent, isUserAdded: isUserAdded))
+                    let folder = item.lastPathComponent, base = file.deletingPathExtension().lastPathComponent
+                    out.append(Design(url: file, category: label(folder), isUserAdded: isUserAdded,
+                                      name: label("\(folder)/\(base)", or: base)))
                 }
             } else if extensions.contains(item.pathExtension.lowercased()) {
-                out.append(Design(url: item, category: isUserAdded ? Self.userCategory : "عام", isUserAdded: isUserAdded))
+                let base = item.deletingPathExtension().lastPathComponent
+                out.append(Design(url: item, category: isUserAdded ? Self.userCategory : "عام", isUserAdded: isUserAdded,
+                                  name: label(base)))
             }
         }
         return out
+    }
+
+    private func label(_ key: String, or fallback: String? = nil) -> String {
+        labels[key] ?? fallback ?? key
     }
 
     @discardableResult
