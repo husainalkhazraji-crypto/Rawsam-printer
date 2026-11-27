@@ -10,11 +10,16 @@ from model import Generator
 
 out = 'model-out'
 os.makedirs(out, exist_ok=True)
-styles = ['contour_style', 'anime_style', 'opensketch_style']
+import json
+files = [f['path'] for f in json.load(urllib.request.urlopen('https://huggingface.co/api/models/OzzyGT/lineart/tree/main?recursive=1')) if f['type'] == 'file']
+print('repo files:', files)
+weights = {p.split('/')[0]: p for p in files if p.endswith('.pth') and '/' in p}
+styles = sorted(weights)
+print('styles:', styles)
 nets = {}
 for style in styles:
     path = f'{style}.pth'
-    urllib.request.urlretrieve(f'https://huggingface.co/OzzyGT/lineart/resolve/main/{style}/netG_A_latest.pth', path)
+    urllib.request.urlretrieve(f'https://huggingface.co/OzzyGT/lineart/resolve/main/{weights[style]}', path)
     state = torch.load(path, map_location='cpu')
     state = {k.replace('module.', ''): v for k, v in state.items()}
     net = Generator(3, 1, 3)
