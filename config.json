@@ -1,0 +1,59 @@
+{
+  "bannerSeconds": 3,
+  "banners": [
+    {
+      "file": "32cdd77cdd5e47759389c936e8528ad8.jpg"
+    },
+    {
+      "file": "9cf34334f30b41a79d71bb85f0c03dfa.jpg"
+    }
+  ],
+  "categories": [
+    {
+      "id": "small",
+      "items": [
+        {
+          "file": "c115fbe46cac4fb98adaa716848849a7.jpg"
+        },
+        {
+          "file": "802262a85fe246f1a8f0e5583a864eff.jpg"
+        },
+        {
+          "file": "8f53389a133d4233aad99ce8a8281510.jpg"
+        }
+      ],
+      "name": "وشمات صغيرة"
+    },
+    {
+      "id": "flowers",
+      "items": [
+        {
+          "file": "9a98f02edf444769881983f699257ef8.jpg"
+        },
+        {
+          "file": "8b69a27c96fc4ada906693c712aa8f2c.jpg"
+        }
+      ],
+      "name": "ورود"
+    },
+    {
+      "id": "practical",
+      "items": [],
+      "name": "وشم عملية"
+    },
+    {
+      "id": "hearts",
+      "items": [
+        {
+          "file": "8f53389a133d4233aad99ce8a8281510.jpg"
+        },
+        {
+          "file": "95dc0864d8754048b8c4666a599461c6.jpg"
+        }
+      ],
+      "name": "قلوب"
+    }
+  ],
+  "passwordHash": "68978ee1a10133d4d0dc52d828fdf4e08277cada51699844b219f02aceaca47a",
+  "version": 1
+}
