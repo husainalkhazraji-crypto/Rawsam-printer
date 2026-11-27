@@ -239,6 +239,9 @@ struct EditorView: View {
                 Text("الـ AI يرسم…").font(.caption).foregroundStyle(.secondary)
             }
         }
+        if model.selected?.style.mode == .ai && !model.aiWorking && model.aiError == nil {
+            Label("رسمها الـ AI", systemImage: "checkmark.seal.fill").font(.caption).foregroundStyle(Color.ok)
+        }
         if let error = model.aiError {
             Text("ما گدر الـ AI يرسم: \(error)").font(.caption).foregroundStyle(Color.brand)
         }

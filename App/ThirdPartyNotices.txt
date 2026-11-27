@@ -2,7 +2,7 @@ Rawsam printer uses the following open source work:
 
 Informative Drawings (line art model)
 https://github.com/carolineec/informative-drawings
-Weights: https://huggingface.co/OzzyGT/lineart
+Weights (opensketch style): https://huggingface.co/backnotprop/informative-drawings-image-to-opensketch-onnx
 
 MIT License
 
