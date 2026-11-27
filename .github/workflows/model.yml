@@ -1,0 +1,21 @@
+name: Convert AI model
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [tools/convert_model.py, .github/workflows/model.yml]
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: git clone --depth 1 https://github.com/carolineec/informative-drawings
+      - run: pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu && pip install coremltools==8.1 pillow numpy
+      - run: python tools/convert_model.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lineart-model
+          path: model-out
