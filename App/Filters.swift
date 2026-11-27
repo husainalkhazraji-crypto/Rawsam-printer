@@ -3,6 +3,7 @@ import UIKit
 enum ImageMode: String {
     case original   // الصورة على حالها
     case drawing    // رسم ستنسل أسود وأبيض
+    case ai         // رسم بالذكاء الاصطناعي داخل التلفون
 }
 
 struct ImageStyle: Hashable {
@@ -13,20 +14,41 @@ struct ImageStyle: Hashable {
 
     /// أفضل إعدادات للستنسل: الخطوط الأساسية بس، بسمك واضح، وبدون تظليل.
     static let stencil = ImageStyle(mode: .drawing)
+    static let aiStencil = ImageStyle(mode: .ai)
 }
 
 enum Filters {
     /// يرجع الصورة بالحجم المطلوب بالضبط. الرسم: نقاط سوداء على خلفية شفافة.
-    static func process(_ source: CGImage, crop: NormRect, style: ImageStyle, width: Int, height: Int) -> CGImage? {
-        guard width > 0, height > 0 else { return nil }
-        var image = source
-        if crop != .full {
-            let rect = CGRect(x: crop.x * Double(source.width), y: crop.y * Double(source.height),
-                              width: crop.w * Double(source.width), height: crop.h * Double(source.height)).integral
-            if let cropped = source.cropping(to: rect) { image = cropped }
-        }
-        if style.mode == .original { return scaled(image, width, height) }
+    static func cropped(_ source: CGImage, _ crop: NormRect) -> CGImage {
+        guard crop != .full else { return source }
+        let rect = CGRect(x: crop.x * Double(source.width), y: crop.y * Double(source.height),
+                          width: crop.w * Double(source.width), height: crop.h * Double(source.height)).integral
+        return source.cropping(to: rect) ?? source
+    }
 
+    /// `ai`: رسم النموذج للصورة المقصوصة (مطلوب بوضع AI بس).
+    static func process(_ source: CGImage, ai: CGImage?, crop: NormRect, style: ImageStyle, width: Int, height: Int) -> CGImage? {
+        guard width > 0, height > 0 else { return nil }
+        let image = cropped(source, crop)
+        switch style.mode {
+        case .original:
+            return scaled(image, width, height)
+        case .drawing:
+            guard let gray = grayPixels(image, width, height) else { return nil }
+            return mask(stencil(gray, width, height, style), width, height)
+        case .ai:
+            guard let ai, let lines = grayPixels(ai, width, height) else { return nil }
+            let cut = UInt8(80 + 110 * clamp01(style.lines))
+            var black = lines.map { $0 < cut }
+            let original = style.shading > 0 ? grayPixels(image, width, height) : nil
+            finish(&black, original, width, height, style)
+            return mask(black, width, height)
+        }
+    }
+
+    private static func clamp01(_ v: Double) -> Double { min(1, max(0, v)) }
+
+    private static func grayPixels(_ image: CGImage, _ width: Int, _ height: Int) -> [UInt8]? {
         var gray = [UInt8](repeating: 255, count: width * height)
         let drawn = gray.withUnsafeMutableBytes { buffer -> Bool in
             guard let ctx = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
@@ -38,8 +60,25 @@ enum Filters {
             ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
-        guard drawn else { return nil }
-        return mask(stencil(gray, width, height, style), width, height)
+        return drawn ? gray : nil
+    }
+
+    /// تنظيف النقاط، السمك، والتظليل: نفسها للرسم العادي ورسم الـ AI.
+    private static func finish(_ out: inout [Bool], _ original: [UInt8]?, _ w: Int, _ h: Int, _ s: ImageStyle) {
+        let scale = Float(max(w, h)) / 1000
+        removeSpecks(&out, w, h, minArea: max(6, Int(18 * scale * scale)))
+        out = dilate(out, w, h, Int((s.thickness * 3 * Double(scale)).rounded()))
+        guard s.shading > 0, let original else { return }
+        let tone = blur(original.map { Float($0) / 255 }, w, h, max(0.6, scale))
+        let bayer: [Float] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map { $0 / 16 }
+        let cut = Float(0.25 + 0.45 * s.shading)
+        for y in 0..<h {
+            for x in 0..<w {
+                let i = y * w + x
+                let dark = min(1, max(0, (cut - tone[i]) / cut))
+                if dark > bayer[(y & 3) * 4 + (x & 3)] + 0.05 { out[i] = true }
+            }
+        }
     }
 
     /// الصورة الأصلية بخلفية بيضاء.
@@ -78,21 +117,8 @@ enum Filters {
         var out = [Bool](repeating: false, count: n)
         for i in 0..<n { out[i] = g1[i] - 0.985 * g2[i] < eps }
 
-        // نشيل النقاط الصغيرة المتناثرة حتى يطلع الستنسل نظيف.
-        removeSpecks(&out, w, h, minArea: max(6, Int(18 * scale * scale)))
-        out = dilate(out, w, h, Int((s.thickness * 3 * Double(scale)).rounded()))
-
-        if s.shading > 0 {
-            let bayer: [Float] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map { $0 / 16 }
-            let cut = Float(0.25 + 0.45 * s.shading)
-            for y in 0..<h {
-                for x in 0..<w {
-                    let i = y * w + x
-                    let tone = min(1, max(0, (cut - g1[i]) / cut))
-                    if tone > bayer[(y & 3) * 4 + (x & 3)] + 0.05 { out[i] = true }
-                }
-            }
-        }
+        // نشيل النقاط الصغيرة، ونضبط السمك والتظليل.
+        finish(&out, s.shading > 0 ? g : nil, w, h, s)
         return out
     }
 

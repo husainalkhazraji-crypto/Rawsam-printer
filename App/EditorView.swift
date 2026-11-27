@@ -213,14 +213,41 @@ struct EditorView: View {
         Binding(get: { model.selected?.style ?? ImageStyle() }, set: { s in model.update { $0.style = s } })
     }
 
+    /// اختيار طريقة الرسم: عادي أو AI.
+    private var engineBinding: Binding<ImageMode> {
+        Binding(get: { model.selected?.style.mode ?? .drawing },
+                set: { mode in
+                    model.aiFailed = false
+                    model.update { $0.style = mode == .ai ? .aiStencil : .stencil }
+                })
+    }
+
     @ViewBuilder
     private var editPanel: some View {
-        if model.selected?.style.mode == .drawing {
+        if model.selected?.style.mode != .original && LineArtAI.available {
+            Picker("", selection: engineBinding) {
+                Text("رسم عادي").tag(ImageMode.drawing)
+                Text("رسم AI").tag(ImageMode.ai)
+            }
+            .pickerStyle(.segmented)
+            if model.aiWorking {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("الـ AI يرسم…").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if model.aiFailed {
+                Text("ما گدر الـ AI يرسم هالصورة، رجعتها للرسم العادي.").font(.caption).foregroundStyle(Color.brand)
+            }
+        }
+        if model.selected?.style.mode != .original {
             slider("خطوط", styleBinding.lines)
             slider("السُمك", styleBinding.thickness)
             slider("تظليل", styleBinding.shading)
             HStack {
-                Button("الإعدادات الأفضل") { model.update { $0.style = .stencil } }
+                Button("الإعدادات الأفضل") {
+                    model.update { $0.style = $0.style.mode == .ai ? .aiStencil : .stencil }
+                }
                 Spacer()
                 Button("الصورة الأصلية") { model.update { $0.style.mode = .original } }
             }

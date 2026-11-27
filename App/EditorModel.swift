@@ -47,6 +47,16 @@ final class EditorModel: ObservableObject {
     @Published var layers: [Layer] = []
     @Published var selectedID: UUID?
     @Published private(set) var processed: [UUID: Processed] = [:]
+    @Published private(set) var aiWorking = false
+    @Published var aiFailed = false
+    /// رسم الـ AI لكل صورة ومنطقة قص (ثقيل، فنحسبه مرة وحدة).
+    private var aiMaps: [AIKey: CGImage] = [:]
+
+    private struct AIKey: Hashable {
+        let id: UUID
+        let crop: NormRect
+        let version: Int
+    }
 
     var selectedIndex: Int? { layers.firstIndex { $0.id == selectedID } }
     var selected: Layer? { selectedIndex.map { layers[$0] } }
@@ -128,8 +138,31 @@ final class EditorModel: ObservableObject {
             if processed[layer.id]?.key == key { continue }
             guard let cg = layer.source.cgImage else { continue }
             let height = min(3400, max(1, Int((CGFloat(key.px) * layer.aspect).rounded())))
+            var ai: CGImage?
+            if key.style.mode == .ai {
+                let aiKey = AIKey(id: layer.id, crop: key.crop, version: key.version)
+                if let cached = aiMaps[aiKey] {
+                    ai = cached
+                } else {
+                    aiWorking = true
+                    let crop = key.crop
+                    let drawn = await Task.detached(priority: .userInitiated) {
+                        LineArtAI.draw(Filters.cropped(cg, crop))
+                    }.value
+                    aiWorking = false
+                    if Task.isCancelled { return }
+                    guard let drawn else {
+                        aiFailed = true
+                        if let i = layers.firstIndex(where: { $0.id == layer.id }) { layers[i].style = .stencil }
+                        return
+                    }
+                    aiMaps[aiKey] = drawn
+                    ai = drawn
+                }
+            }
+            let aiMap = ai
             let result = await Task.detached(priority: .userInitiated) {
-                Filters.process(cg, crop: key.crop, style: key.style, width: key.px, height: height)
+                Filters.process(cg, ai: aiMap, crop: key.crop, style: key.style, width: key.px, height: height)
             }.value
             if Task.isCancelled { return }
             if let result { processed[layer.id] = Processed(key: key, image: UIImage(cgImage: result)) }

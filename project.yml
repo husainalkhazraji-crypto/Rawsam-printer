@@ -17,6 +17,11 @@ targets:
       - path: App
         excludes:
           - Info.plist
+          - LineArt.mlpackage
+          - LineArt.mlpackage/**
+      - path: App/LineArt.mlpackage
+        type: file
+        buildPhase: sources
     settings:
       base:
         PRODUCT_NAME: RawsamPrinter
