@@ -345,6 +345,7 @@ struct CanvasView: View {
         }
         .clipped()
         .shadow(color: .black.opacity(0.12), radius: 6)
+        .overlay { selectionOverlay(s) }
         .coordinateSpace(name: "page")
         .simultaneousGesture(
             MagnifyGesture().simultaneously(with: RotateGesture())
@@ -367,7 +368,6 @@ struct CanvasView: View {
     }
 
     private func layerView(_ layer: Layer, _ s: CGFloat) -> some View {
-        let selected = layer.id == model.selectedID
         let w = max(1, layer.widthMM * s), h = max(1, layer.heightMM * s)
         return ZStack {
             if let image = model.processed[layer.id]?.image {
@@ -393,35 +393,36 @@ struct CanvasView: View {
                 }
                 .onEnded { _ in dragStart = nil }
         )
-        .overlay {
-            if selected {
+        .rotationEffect(.degrees(layer.rotation))
+        .position(x: layer.center.x * s, y: layer.center.y * s)
+    }
+
+    /// الإطار والأزرار على الصندوق المحيط بالصورة، وما يدورون ويّاها.
+    @ViewBuilder
+    private func selectionOverlay(_ s: CGFloat) -> some View {
+        if let layer = model.selected {
+            let b = model.bounds(layer)
+            let r = CGRect(x: b.minX * s, y: b.minY * s, width: b.width * s, height: b.height * s)
+            ZStack {
                 Rectangle()
                     .stroke(Color.brand, style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+                    .frame(width: max(1, r.width), height: max(1, r.height))
+                    .position(x: r.midX, y: r.midY)
                     .allowsHitTesting(false)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            if selected { handle("xmark").offset(x: -22, y: -22).onTapGesture { model.delete() } }
-        }
-        .overlay(alignment: .topTrailing) {
-            if selected { handle("rotate.right").offset(x: 22, y: -22).onTapGesture { model.rotate90() } }
-        }
-        .overlay(alignment: .bottomLeading) {
-            if selected {
+                handle("xmark")
+                    .position(x: r.minX, y: r.minY)
+                    .onTapGesture { model.delete() }
+                handle("rotate.right")
+                    .position(x: r.maxX, y: r.minY)
+                    .onTapGesture { model.rotate90() }
                 handle("arrow.left.and.right.righttriangle.left.righttriangle.right")
-                    .offset(x: -22, y: 22)
+                    .position(x: r.minX, y: r.maxY)
                     .onTapGesture { model.update { $0.mirrored.toggle() } }
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if selected {
                 handle("arrow.up.left.and.arrow.down.right")
-                    .offset(x: 22, y: 22)
+                    .position(x: r.maxX, y: r.maxY)
                     .gesture(resize(layer, s))
             }
         }
-        .rotationEffect(.degrees(layer.rotation))
-        .position(x: layer.center.x * s, y: layer.center.y * s)
     }
 
     /// زر صغير بالشكل، بس مساحة اللمس كبيرة (44 نقطة) حتى ينضغط بسهولة.
