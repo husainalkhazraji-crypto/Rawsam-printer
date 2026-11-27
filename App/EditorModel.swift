@@ -48,7 +48,7 @@ final class EditorModel: ObservableObject {
     @Published var selectedID: UUID?
     @Published private(set) var processed: [UUID: Processed] = [:]
     @Published private(set) var aiWorking = false
-    @Published var aiFailed = false
+    @Published var aiError: String?
     /// رسم الـ AI لكل صورة ومنطقة قص (ثقيل، فنحسبه مرة وحدة).
     private var aiMaps: [AIKey: CGImage] = [:]
 
@@ -146,14 +146,17 @@ final class EditorModel: ObservableObject {
                 } else {
                     aiWorking = true
                     let crop = key.crop
-                    let drawn = await Task.detached(priority: .userInitiated) {
+                    let outcome = await Task.detached(priority: .userInitiated) {
                         LineArtAI.draw(Filters.cropped(cg, crop))
                     }.value
                     aiWorking = false
                     if Task.isCancelled { return }
-                    guard let drawn else {
-                        aiFailed = true
-                        if let i = layers.firstIndex(where: { $0.id == layer.id }) { layers[i].style = .stencil }
+                    let drawn: CGImage
+                    switch outcome {
+                    case .success(let image): drawn = image
+                    case .failure(let error):
+                        aiError = error.localizedDescription
+                        if let i = layers.firstIndex(where: { $0.id == layer.id }) { layers[i].style.mode = .original }
                         return
                     }
                     aiMaps[aiKey] = drawn

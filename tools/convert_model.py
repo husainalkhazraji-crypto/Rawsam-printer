@@ -68,9 +68,10 @@ class Wrap(nn.Module):
 
 for style in styles:
     traced = torch.jit.trace(Wrap(nets[style]).eval(), torch.rand(1, 3, 512, 512))
-    side = ct.RangeDim(lower_bound=128, upper_bound=1536, default=512)
+    # حجم ثابت 768×768: أضمن تشغيل على كل الآيفونات.
+    traced = torch.jit.trace(Wrap(nets[style]).eval(), torch.rand(1, 3, 768, 768))
     model = ct.convert(traced,
-                       inputs=[ct.ImageType(name='image', shape=(1, 3, side, side), scale=1 / 255.0,
+                       inputs=[ct.ImageType(name='image', shape=(1, 3, 768, 768), scale=1 / 255.0,
                                             color_layout=ct.colorlayout.RGB)],
                        outputs=[ct.ImageType(name='lines', color_layout=ct.colorlayout.GRAYSCALE)],
                        minimum_deployment_target=ct.target.iOS17,

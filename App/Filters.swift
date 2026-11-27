@@ -2,23 +2,22 @@ import UIKit
 
 enum ImageMode: String {
     case original   // الصورة على حالها
-    case drawing    // رسم ستنسل أسود وأبيض
+    case drawing    // رسم قلم رصاص (خطوط)
     case ai         // رسم بالذكاء الاصطناعي داخل التلفون
 }
 
 struct ImageStyle: Hashable {
     var mode: ImageMode = .original
-    var lines = 0.5       // كثرة الخطوط والتفاصيل
-    var thickness = 0.33  // سمك الخط
-    var shading = 0.0     // تظليل المناطق الغامقة (صفر = خطوط بس، الأفضل للستنسل)
+    var detail = 0.5      // التفاصيل: كثرة الخطوط
+    var darkness = 0.5    // الغمقان: تغميق أو تفتيح الخطوط
+    var thickness = 0.2   // السمك
+    var shading = 0.0     // تظليل بالنقاط مثل قلم الرصاص (صفر = خطوط بس، الأفضل للستنسل)
 
-    /// أفضل إعدادات للستنسل: الخطوط الأساسية بس، بسمك واضح، وبدون تظليل.
-    static let stencil = ImageStyle(mode: .drawing)
+    static let pencil = ImageStyle(mode: .drawing)
     static let aiStencil = ImageStyle(mode: .ai)
 }
 
 enum Filters {
-    /// يرجع الصورة بالحجم المطلوب بالضبط. الرسم: نقاط سوداء على خلفية شفافة.
     static func cropped(_ source: CGImage, _ crop: NormRect) -> CGImage {
         guard crop != .full else { return source }
         let rect = CGRect(x: crop.x * Double(source.width), y: crop.y * Double(source.height),
@@ -26,22 +25,31 @@ enum Filters {
         return source.cropping(to: rect) ?? source
     }
 
+    /// يرجع الصورة بالحجم المطلوب بالضبط. الرسم: نقاط سوداء على خلفية شفافة.
     /// `ai`: رسم النموذج للصورة المقصوصة (مطلوب بوضع AI بس).
     static func process(_ source: CGImage, ai: CGImage?, crop: NormRect, style: ImageStyle, width: Int, height: Int) -> CGImage? {
         guard width > 0, height > 0 else { return nil }
         let image = cropped(source, crop)
+        let scale = Float(max(width, height)) / 1000
         switch style.mode {
         case .original:
             return scaled(image, width, height)
         case .drawing:
             guard let gray = grayPixels(image, width, height) else { return nil }
-            return mask(stencil(gray, width, height, style), width, height)
+            let sketch = pencil(gray, width, height, detail: style.detail)
+            let cut = Float(0.76 + 0.18 * clamp01(style.darkness))
+            var black = sketch.map { $0 < cut }
+            removeSpecks(&black, width, height, minArea: max(4, Int(8 * scale * scale)))
+            finish(&black, sketch, width, height, style)
+            return mask(black, width, height)
         case .ai:
             guard let ai, let lines = grayPixels(ai, width, height) else { return nil }
-            let cut = UInt8(80 + 110 * clamp01(style.lines))
+            let cut = UInt8(80 + 110 * clamp01(style.darkness))
             var black = lines.map { $0 < cut }
-            let original = style.shading > 0 ? grayPixels(image, width, height) : nil
-            finish(&black, original, width, height, style)
+            let area = (6 + 30 * (1 - clamp01(style.detail))) * Double(scale * scale)
+            removeSpecks(&black, width, height, minArea: max(4, Int(area)))
+            let sketch = style.shading > 0 ? grayPixels(image, width, height).map { pencil($0, width, height, detail: 0.5) } : nil
+            finish(&black, sketch, width, height, style)
             return mask(black, width, height)
         }
     }
@@ -63,20 +71,31 @@ enum Filters {
         return drawn ? gray : nil
     }
 
-    /// تنظيف النقاط، السمك، والتظليل: نفسها للرسم العادي ورسم الـ AI.
-    private static func finish(_ out: inout [Bool], _ original: [UInt8]?, _ w: Int, _ h: Int, _ s: ImageStyle) {
+    /// رسم قلم رصاص: الصورة مقسومة على عكسها المغبّش (Color Dodge).
+    /// النتيجة رمادية من 0 (أسود) إلى 1 (أبيض).
+    private static func pencil(_ g: [UInt8], _ w: Int, _ h: Int, detail: Double) -> [Float] {
         let scale = Float(max(w, h)) / 1000
-        removeSpecks(&out, w, h, minArea: max(6, Int(18 * scale * scale)))
+        let sigma = max(1, (2 + 10 * Float(clamp01(detail))) * scale)
+        let gray = g.map { Float($0) / 255 }
+        let blurredInverse = fastBlur(gray.map { 1 - $0 }, w, h, sigma)
+        var out = [Float](repeating: 1, count: gray.count)
+        for i in gray.indices {
+            out[i] = min(1, gray[i] / max(1 - blurredInverse[i], 0.001))
+        }
+        return out
+    }
+
+    /// السمك والتظليل: نفسها للرسم العادي ورسم الـ AI.
+    private static func finish(_ out: inout [Bool], _ sketch: [Float]?, _ w: Int, _ h: Int, _ s: ImageStyle) {
+        let scale = Float(max(w, h)) / 1000
         out = dilate(out, w, h, Int((s.thickness * 3 * Double(scale)).rounded()))
-        guard s.shading > 0, let original else { return }
-        let tone = blur(original.map { Float($0) / 255 }, w, h, max(0.6, scale))
+        guard s.shading > 0, let sketch else { return }
         let bayer: [Float] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map { $0 / 16 }
-        let cut = Float(0.25 + 0.45 * s.shading)
+        let gamma = Float(1 + 5 * s.shading)
         for y in 0..<h {
             for x in 0..<w {
                 let i = y * w + x
-                let dark = min(1, max(0, (cut - tone[i]) / cut))
-                if dark > bayer[(y & 3) * 4 + (x & 3)] + 0.05 { out[i] = true }
+                if powf(sketch[i], gamma) < bayer[(y & 3) * 4 + (x & 3)] { out[i] = true }
             }
         }
     }
@@ -91,35 +110,6 @@ enum Filters {
         ctx.interpolationQuality = .high
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
         return ctx.makeImage()
-    }
-
-    // MARK: - الرسم (فرق غاوسيين، مثل رسم الستنسل)
-
-    private static func stencil(_ g: [UInt8], _ w: Int, _ h: Int, _ s: ImageStyle) -> [Bool] {
-        let n = w * h
-        var hist = [Int](repeating: 0, count: 256)
-        for v in g { hist[Int(v)] += 1 }
-        func percentile(_ p: Double) -> Int {
-            let target = Int(Double(n) * p)
-            var acc = 0
-            for i in 0..<256 { acc += hist[i]; if acc >= target { return i } }
-            return 255
-        }
-        let lo = Float(percentile(0.01))
-        let hi = max(Float(percentile(0.99)), lo + 1)
-        let f = g.map { min(1, max(0, (Float($0) - lo) / (hi - lo))) }
-
-        let scale = Float(max(w, h)) / 1000
-        let sigma = max(0.6, (2.6 - 1.8 * Float(s.lines)) * scale)
-        let g1 = blur(f, w, h, sigma)
-        let g2 = blur(f, w, h, sigma * 1.6)
-        let eps = -0.006 - 0.016 * Float(1 - s.lines)
-        var out = [Bool](repeating: false, count: n)
-        for i in 0..<n { out[i] = g1[i] - 0.985 * g2[i] < eps }
-
-        // نشيل النقاط الصغيرة، ونضبط السمك والتظليل.
-        finish(&out, s.shading > 0 ? g : nil, w, h, s)
-        return out
     }
 
     private static func removeSpecks(_ b: inout [Bool], _ w: Int, _ h: Int, minArea: Int) {
@@ -162,6 +152,42 @@ enum Filters {
         for y in 0..<h {
             for x in 0..<w where tmp[y * w + x] {
                 for yy in max(0, y - r)...min(h - 1, y + r) { out[yy * w + x] = true }
+            }
+        }
+        return out
+    }
+
+    /// تغبيش سريع للقيم الكبيرة: نصغّر، نغبّش، ونرجع نكبّر.
+    private static func fastBlur(_ src: [Float], _ w: Int, _ h: Int, _ sigma: Float) -> [Float] {
+        let f = Int(sigma / 2)
+        guard f >= 2 else { return blur(src, w, h, sigma) }
+        let sw = (w + f - 1) / f, sh = (h + f - 1) / f
+        var small = [Float](repeating: 0, count: sw * sh)
+        var count = [Float](repeating: 0, count: sw * sh)
+        for y in 0..<h {
+            let sy = y / f
+            for x in 0..<w {
+                let i = sy * sw + x / f
+                small[i] += src[y * w + x]
+                count[i] += 1
+            }
+        }
+        for i in small.indices { small[i] /= max(count[i], 1) }
+        let b = blur(small, sw, sh, sigma / Float(f))
+        var out = [Float](repeating: 0, count: w * h)
+        for y in 0..<h {
+            let fy = (Float(y) + 0.5) / Float(f) - 0.5
+            let y0 = max(0, min(sh - 1, Int(fy.rounded(.down))))
+            let y1 = min(sh - 1, y0 + 1)
+            let ty = max(0, min(1, fy - Float(y0)))
+            for x in 0..<w {
+                let fx = (Float(x) + 0.5) / Float(f) - 0.5
+                let x0 = max(0, min(sw - 1, Int(fx.rounded(.down))))
+                let x1 = min(sw - 1, x0 + 1)
+                let tx = max(0, min(1, fx - Float(x0)))
+                let top = b[y0 * sw + x0] * (1 - tx) + b[y0 * sw + x1] * tx
+                let bottom = b[y1 * sw + x0] * (1 - tx) + b[y1 * sw + x1] * tx
+                out[y * w + x] = top * (1 - ty) + bottom * ty
             }
         }
         return out

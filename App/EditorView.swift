@@ -182,10 +182,7 @@ struct EditorView: View {
 
     private func tap(_ tool: Tool) {
         switch tool {
-        case .edit:
-            // أول ضغطة تحول الصورة لرسم ستنسل بأفضل إعدادات.
-            if model.selected?.style.mode == .original { model.update { $0.style = .stencil } }
-            withAnimation(.snappy) { panel = panel == .edit ? nil : .edit }
+        case .edit: withAnimation(.snappy) { panel = panel == .edit ? nil : .edit }
         case .heat: withAnimation(.snappy) { panel = panel == .heat ? nil : .heat }
         case .crop: cropping = true
         case .copy: model.duplicate()
@@ -213,55 +210,54 @@ struct EditorView: View {
         Binding(get: { model.selected?.style ?? ImageStyle() }, set: { s in model.update { $0.style = s } })
     }
 
-    /// اختيار طريقة الرسم: عادي أو AI.
-    private var engineBinding: Binding<ImageMode> {
-        Binding(get: { model.selected?.style.mode ?? .drawing },
+    /// الصورة تبقى على حالها لحد ما المستخدم يختار رسم عادي أو AI.
+    private var modeBinding: Binding<ImageMode> {
+        Binding(get: { model.selected?.style.mode ?? .original },
                 set: { mode in
-                    model.aiFailed = false
-                    model.update { $0.style = mode == .ai ? .aiStencil : .stencil }
+                    model.aiError = nil
+                    model.update {
+                        switch mode {
+                        case .original: $0.style.mode = .original
+                        case .drawing: $0.style = .pencil
+                        case .ai: $0.style = .aiStencil
+                        }
+                    }
                 })
     }
 
     @ViewBuilder
     private var editPanel: some View {
-        if model.selected?.style.mode != .original && LineArtAI.available {
-            Picker("", selection: engineBinding) {
-                Text("رسم عادي").tag(ImageMode.drawing)
-                Text("رسم AI").tag(ImageMode.ai)
-            }
-            .pickerStyle(.segmented)
-            if model.aiWorking {
-                HStack(spacing: 8) {
-                    ProgressView()
-                    Text("الـ AI يرسم…").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            if model.aiFailed {
-                Text("ما گدر الـ AI يرسم هالصورة، رجعتها للرسم العادي.").font(.caption).foregroundStyle(Color.brand)
+        Picker("", selection: modeBinding) {
+            Text("الأصلية").tag(ImageMode.original)
+            Text("رسم عادي").tag(ImageMode.drawing)
+            if LineArtAI.available { Text("رسم AI").tag(ImageMode.ai) }
+        }
+        .pickerStyle(.segmented)
+        if model.aiWorking {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text("الـ AI يرسم…").font(.caption).foregroundStyle(.secondary)
             }
         }
+        if let error = model.aiError {
+            Text("ما گدر الـ AI يرسم: \(error)").font(.caption).foregroundStyle(Color.brand)
+        }
         if model.selected?.style.mode != .original {
-            slider("خطوط", styleBinding.lines)
+            slider("التفاصيل", styleBinding.detail)
+            slider("الغمقان", styleBinding.darkness)
             slider("السُمك", styleBinding.thickness)
             slider("تظليل", styleBinding.shading)
-            HStack {
-                Button("الإعدادات الأفضل") {
-                    model.update { $0.style = $0.style.mode == .ai ? .aiStencil : .stencil }
-                }
-                Spacer()
-                Button("الصورة الأصلية") { model.update { $0.style.mode = .original } }
+            Button("رجّع الإعدادات الأفضل") {
+                model.update { $0.style = $0.style.mode == .ai ? .aiStencil : .pencil }
             }
             .buttonStyle(.bordered)
             .font(.subheadline)
-        } else {
-            Button("حوّل لرسم ستنسل") { model.update { $0.style = .stencil } }
-                .buttonStyle(.borderedProminent)
         }
     }
 
     private func slider(_ title: String, _ value: Binding<Double>) -> some View {
         HStack {
-            Text(title).frame(width: 56, alignment: .leading)
+            Text(title).frame(width: 64, alignment: .leading)
             Slider(value: value, in: 0...1)
         }
         .font(.subheadline)
