@@ -1,12 +1,12 @@
 Rawsam printer uses the following open source work:
 
-Informative Drawings (line art model)
-https://github.com/carolineec/informative-drawings
-Weights (opensketch style): https://huggingface.co/backnotprop/informative-drawings-image-to-opensketch-onnx
+TEED: Tiny and Efficient Edge Detector (AI line drawing)
+https://github.com/xavysp/TEED
+Weights: https://huggingface.co/fal-ai/teed
 
 MIT License
 
-Copyright (c) 2022 Caroline Chan
+Copyright (c) 2022 Xavier Soria Poma
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -245,16 +245,27 @@ struct EditorView: View {
         if let error = model.aiError {
             Text("ما گدر الـ AI يرسم: \(error)").font(.caption).foregroundStyle(Color.brand)
         }
-        if model.selected?.style.mode != .original {
-            slider("التفاصيل", styleBinding.detail)
-            slider("الغمقان", styleBinding.darkness)
-            slider("السُمك", styleBinding.thickness)
-            slider("تظليل", styleBinding.shading)
+        if let mode = model.selected?.style.mode, mode != .original {
+            let locked = mode == .ai && !styleBinding.wrappedValue.custom
+            if mode == .ai {
+                Toggle("تطبيق الإعدادات", isOn: styleBinding.custom)
+                    .font(.subheadline.bold())
+                    .tint(.brand)
+            }
+            Group {
+                slider("التفاصيل", styleBinding.detail)
+                slider("الغمقان", styleBinding.darkness)
+                slider("السُمك", styleBinding.thickness)
+                slider("تظليل", styleBinding.shading)
+            }
+            .disabled(locked)
+            .opacity(locked ? 0.4 : 1)
             Button("رجّع الإعدادات الأفضل") {
                 model.update { $0.style = $0.style.mode == .ai ? .aiStencil : .pencil }
             }
             .buttonStyle(.bordered)
             .font(.subheadline)
+            .disabled(locked)
         }
     }
 

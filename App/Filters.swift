@@ -12,9 +12,12 @@ struct ImageStyle: Hashable {
     var darkness = 0.5    // الغمقان: تغميق أو تفتيح الخطوط
     var thickness = 0.2   // السمك
     var shading = 0.0     // تظليل بالنقاط مثل قلم الرصاص (صفر = خطوط بس، الأفضل للستنسل)
+    var custom = false    // رسم AI: الشرائح ما تتطبق إلا إذا المستخدم شغّل «تطبيق الإعدادات»
 
     static let pencil = ImageStyle(mode: .drawing)
     static let aiStencil = ImageStyle(mode: .ai)
+    /// إعدادات الـ AI الثابتة لما «تطبيق الإعدادات» مطفي.
+    static let aiDefaults = ImageStyle(mode: .ai, detail: 0.5, darkness: 0.5, thickness: 0, shading: 0)
 }
 
 enum Filters {
@@ -44,12 +47,13 @@ enum Filters {
             return mask(black, width, height)
         case .ai:
             guard let ai, let lines = grayPixels(ai, width, height) else { return nil }
-            let cut = UInt8(80 + 110 * clamp01(style.darkness))
+            let st = style.custom ? style : .aiDefaults
+            let cut = UInt8(80 + 146 * clamp01(st.darkness))
             var black = lines.map { $0 < cut }
-            let area = (6 + 30 * (1 - clamp01(style.detail))) * Double(scale * scale)
+            let area = (6 + 30 * (1 - clamp01(st.detail))) * Double(scale * scale)
             removeSpecks(&black, width, height, minArea: max(4, Int(area)))
-            let sketch = style.shading > 0 ? grayPixels(image, width, height).map { pencil($0, width, height, detail: 0.5) } : nil
-            finish(&black, sketch, width, height, style)
+            let sketch = st.shading > 0 ? grayPixels(image, width, height).map { pencil($0, width, height, detail: 0.5) } : nil
+            finish(&black, sketch, width, height, st)
             return mask(black, width, height)
         }
     }
