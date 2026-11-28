@@ -160,8 +160,8 @@ struct GitHubUploader {
         entries.append(["path": "config.json", "mode": "100644", "type": "blob", "content": json])
 
         progress("أحفظ التغييرات…")
-        let tree = try await call("POST", "git/trees", ["base_tree": baseTree, "tree": entries])
-        guard let treeSha = tree["sha"] as? String else { throw UploadError.message("فشل حفظ التغييرات") }
+        let newTree = try await call("POST", "git/trees", ["base_tree": baseTree, "tree": entries])
+        guard let treeSha = newTree["sha"] as? String else { throw UploadError.message("فشل حفظ التغييرات") }
         let newCommit = try await call("POST", "git/commits", ["message": "تحديث المكتبة من التطبيق", "tree": treeSha, "parents": [head]])
         guard let commitSha = newCommit["sha"] as? String else { throw UploadError.message("فشل حفظ التغييرات") }
         _ = try await call("PATCH", "git/refs/heads/\(Cloud.branch)", ["sha": commitSha])
