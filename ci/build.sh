@@ -24,7 +24,8 @@ xcodebuild -project RawsamPrinter.xcodeproj -scheme RawsamPrinter -configuration
   -destination 'generic/platform=iOS' -derivedDataPath build \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 \
   | grep -E "error:|warning: .*\.swift|BUILD (SUCCEEDED|FAILED)" | grep -v "appintents" | head -80 || true
-test -d build/Build/Products/Release-iphoneos/RawsamPrinter.app
+# لازم يكون البناء نجح فعلاً والتطبيق بيه الملف التنفيذي.
+test -f build/Build/Products/Release-iphoneos/RawsamPrinter.app/RawsamPrinter || { echo "البناء فشل"; exit 1; }
 
 echo "== تجهيز ملف IPA"
 mkdir -p Payload

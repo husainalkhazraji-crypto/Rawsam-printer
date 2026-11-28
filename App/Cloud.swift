@@ -24,8 +24,11 @@ struct LibraryConfig: Codable, Hashable {
     var categories: [LibraryCategory] = []
 
     var allFiles: Set<String> {
-        Set(banners.map(\.file) + (editorBanners ?? []).map(\.file) + (settingsBanners ?? []).map(\.file)
-            + categories.flatMap { $0.items.map(\.file) })
+        var files = Set(banners.map(\.file))
+        for item in editorBanners ?? [] { files.insert(item.file) }
+        for item in settingsBanners ?? [] { files.insert(item.file) }
+        for category in categories { for item in category.items { files.insert(item.file) } }
+        return files
     }
 }
 
