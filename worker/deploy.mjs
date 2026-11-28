@@ -61,3 +61,15 @@ writeFileSync('wrangler.toml', readFileSync('wrangler.template.toml', 'utf8').re
 execSync('npx --yes wrangler@3 deploy', { stdio: 'inherit' });
 const sub = await cf('/workers/subdomain').catch(() => null);
 console.log('WORKER_URL=https://rawsam.' + (sub?.subdomain || '?') + '.workers.dev');
+
+// 4) فحص سريع بعد النشر
+const base = 'https://rawsam.' + (sub?.subdomain || '') + '.workers.dev';
+await new Promise((r) => setTimeout(r, 5000));
+const check = async (label, fn) => { try { console.log('CHECK', label, await fn()); } catch (e) { console.log('CHECK', label, 'FAILED', e.message); } };
+const cfg = await (await fetch(base + '/config')).json();
+await check('config', async () => `categories=${cfg.categories?.length} banners=${cfg.banners?.length} hasPassword=${'passwordHash' in cfg}`);
+const first = cfg.banners?.[0]?.file || cfg.categories?.find((c) => c.items.length)?.items[0]?.file;
+await check('image', async () => { const r = await fetch(base + '/files/' + first); return `${r.status} ${r.headers.get('content-type')} ${(await r.arrayBuffer()).byteLength} bytes`; });
+await check('admin without login', async () => (await fetch(base + '/admin/messages')).status);
+await check('wrong password', async () => (await fetch(base + '/admin/login', { method: 'POST', body: JSON.stringify({ password: 'wrong-test' }) })).status);
+await check('long message rejected', async () => (await fetch(base + '/messages', { method: 'POST', body: JSON.stringify({ text: 'x'.repeat(301), device: 'ci-test' }) })).status);
