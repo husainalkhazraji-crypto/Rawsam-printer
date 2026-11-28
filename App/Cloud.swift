@@ -114,13 +114,33 @@ enum UploadError: LocalizedError {
 struct GitHubUploader {
     let token: String
 
+    /// يرجع المكتبة بعد التنظيف (بدون روابط لصور محذوفة).
+    @discardableResult
     func upload(config: LibraryConfig, newFiles: [String: Data], deleted: Set<String>,
-                progress: @escaping (String) -> Void) async throws {
+                progress: @escaping (String) -> Void) async throws -> LibraryConfig {
         progress("أتصل بالسحابة…")
         let ref = try await call("GET", "git/ref/heads/\(Cloud.branch)")
         guard let head = (ref["object"] as? [String: Any])?["sha"] as? String else { throw UploadError.message("ما لكيت فرع المكتبة") }
         let commit = try await call("GET", "git/commits/\(head)")
         guard let baseTree = (commit["tree"] as? [String: Any])?["sha"] as? String else { throw UploadError.message("رد غير متوقع من GitHub") }
+
+        // الصور الموجودة فعلاً بالسحابة هسه.
+        let tree = try await call("GET", "git/trees/\(baseTree)?recursive=1")
+        var existing = Set<String>()
+        for entry in tree["tree"] as? [[String: Any]] ?? [] {
+            if let path = entry["path"] as? String, path.hasPrefix("files/"), entry["type"] as? String == "blob" {
+                existing.insert(String(path.dropFirst(6)))
+            }
+        }
+        // نشيل أي رابط لصورة مو موجودة، حتى ما تطلع صور فارغة.
+        let available = existing.union(newFiles.keys)
+        var config = config
+        config.banners.removeAll { !available.contains($0.file) }
+        config.editorBanners?.removeAll { !available.contains($0.file) }
+        config.settingsBanners?.removeAll { !available.contains($0.file) }
+        for i in config.categories.indices { config.categories[i].items.removeAll { !available.contains($0.file) } }
+        // نحذف بس الصور الموجودة الي ما عاد يستخدمها أي قسم أو بانر.
+        let unused = existing.subtracting(config.allFiles)
 
         var entries: [[String: Any]] = []
         var done = 0
@@ -131,7 +151,7 @@ struct GitHubUploader {
             guard let sha = blob["sha"] as? String else { throw UploadError.message("فشل رفع صورة") }
             entries.append(["path": "files/\(name)", "mode": "100644", "type": "blob", "sha": sha])
         }
-        for name in deleted where newFiles[name] == nil {
+        for name in unused {
             entries.append(["path": "files/\(name)", "mode": "100644", "type": "blob", "sha": NSNull()])
         }
         let encoder = JSONEncoder()
@@ -145,10 +165,11 @@ struct GitHubUploader {
         let newCommit = try await call("POST", "git/commits", ["message": "تحديث المكتبة من التطبيق", "tree": treeSha, "parents": [head]])
         guard let commitSha = newCommit["sha"] as? String else { throw UploadError.message("فشل حفظ التغييرات") }
         _ = try await call("PATCH", "git/refs/heads/\(Cloud.branch)", ["sha": commitSha])
+        return config
     }
 
     private func call(_ method: String, _ path: String, _ body: [String: Any]? = nil) async throws -> [String: Any] {
-        var request = URLRequest(url: Cloud.api.appendingPathComponent(path))
+        var request = URLRequest(url: URL(string: path, relativeTo: Cloud.api)!)
         request.httpMethod = method
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

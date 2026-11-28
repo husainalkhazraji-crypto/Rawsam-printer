@@ -150,10 +150,11 @@ final class AdminDraft: ObservableObject {
         dirty = true
     }
 
-    func committed() {
+    func reset(to saved: LibraryConfig) {
+        config = saved
         newFiles = [:]
         deleted = []
-        uploaded = config.allFiles
+        uploaded = saved.allFiles
         dirty = false
     }
 }
@@ -272,11 +273,11 @@ struct AdminView: View {
         status = "أبدي الرفع…"
         Task {
             do {
-                try await GitHubUploader(token: token).upload(config: config, newFiles: files, deleted: deleted) { text in
+                let saved = try await GitHubUploader(token: token).upload(config: config, newFiles: files, deleted: deleted) { text in
                     Task { @MainActor in status = text }
                 }
-                cloud.apply(config)
-                draft.committed()
+                cloud.apply(saved)
+                draft.reset(to: saved)
                 message = "تم الرفع ✓ التغييرات توصل لكل المستخدمين"
             } catch {
                 message = error.localizedDescription
