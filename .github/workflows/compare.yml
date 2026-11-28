@@ -1,0 +1,26 @@
+name: Compare line-art models
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [tools/compare_models.py, .github/workflows/compare.yml]
+permissions:
+  contents: write
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: git clone --depth 1 https://github.com/carolineec/informative-drawings
+      - run: pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cpu && pip install controlnet_aux==0.0.9 onnxruntime scikit-image scipy pillow numpy
+      - run: python tools/compare_models.py
+      - name: Save results to the model-compare branch
+        run: |
+          cd compare-out
+          git init -q -b model-compare
+          git add -A
+          git -c user.name="github-actions" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "compare ${{ github.sha }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" model-compare
