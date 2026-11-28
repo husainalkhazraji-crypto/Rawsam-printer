@@ -79,6 +79,14 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 8)
             }
+
+            if let ads = cloud.config?.settingsBanners, !ads.isEmpty {
+                Section {
+                    BannerView(items: ads, seconds: cloud.config?.bannerSeconds ?? 3, square: true)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
+            }
         }
         .navigationTitle("الإعدادات")
         .onChange(of: density) { _, new in if new == .thick { heatWarning = true } }
@@ -157,7 +165,6 @@ struct AdminView: View {
     @State private var tokenField = ""
     @State private var newCategory = ""
     @State private var newPassword = ""
-    @State private var bannerPicks: [PhotosPickerItem] = []
     @State private var status: String?
     @State private var message: String?
 
@@ -219,28 +226,11 @@ struct AdminView: View {
                 Text("اضغط على القسم حتى تغيّر اسمه وصوره. اسحب لليسار للحذف، و«تعديل» للترتيب.")
             }
 
-            Section("البانر المتحرك") {
-                if !draft.config.banners.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack {
-                            ForEach(draft.config.banners) { banner in
-                                AdminThumb(draft: draft, file: banner.file, fill: true)
-                                    .frame(width: 150, height: 80)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    .overlay(alignment: .topLeading) {
-                                        removeButton {
-                                            draft.forget(banner.file)
-                                            draft.config.banners.removeAll { $0.file == banner.file }
-                                        }
-                                    }
-                            }
-                        }
-                    }
-                }
-                PhotosPicker(selection: $bannerPicks, matching: .images) {
-                    Label("إضافة صور للبانر", systemImage: "photo.badge.plus")
-                }
-                Stepper("تتبدل كل \(Int(draft.config.bannerSeconds)) ثانية", value: $draft.config.bannerSeconds, in: 1...10, step: 1)
+            AdminBannerSection(title: "بانر الصفحة الرئيسية", draft: draft, items: \.banners, maxSide: 1600, wide: true)
+            AdminBannerSection(title: "إعلان صفحة الطباعة", draft: draft, items: \.editorBannerList, maxSide: 1600, wide: true)
+            AdminBannerSection(title: "إعلان الإعدادات (مربع)", draft: draft, items: \.settingsBannerList, maxSide: 1200, wide: false)
+            Section {
+                Stepper("البانرات تتبدل كل \(Int(draft.config.bannerSeconds)) ثانية", value: $draft.config.bannerSeconds, in: 1...10, step: 1)
             }
 
             Section("كلمة سر المدير") {
@@ -274,18 +264,6 @@ struct AdminView: View {
         }
         .alert(message ?? "", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
             Button("تمام", role: .cancel) {}
-        }
-        .onChange(of: bannerPicks) { _, items in
-            guard !items.isEmpty else { return }
-            Task {
-                for item in items {
-                    if let data = try? await item.loadTransferable(type: Data.self),
-                       let name = draft.addImage(data, maxSide: 1600) {
-                        draft.config.banners.append(LibraryItem(file: name))
-                    }
-                }
-                bannerPicks = []
-            }
         }
     }
 
@@ -395,4 +373,63 @@ func removeButton(_ action: @escaping () -> Void) -> some View {
     }
     .buttonStyle(.borderless)
     .padding(4)
+}
+
+extension LibraryConfig {
+    var editorBannerList: [LibraryItem] {
+        get { editorBanners ?? [] }
+        set { editorBanners = newValue }
+    }
+    var settingsBannerList: [LibraryItem] {
+        get { settingsBanners ?? [] }
+        set { settingsBanners = newValue }
+    }
+}
+
+/// قسم بانر بلوحة المدير: صور، حذف، وإضافة.
+struct AdminBannerSection: View {
+    let title: String
+    @ObservedObject var draft: AdminDraft
+    let items: WritableKeyPath<LibraryConfig, [LibraryItem]>
+    let maxSide: CGFloat
+    let wide: Bool
+    @State private var picks: [PhotosPickerItem] = []
+
+    var body: some View {
+        Section(title) {
+            let list = draft.config[keyPath: items]
+            if !list.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(list) { banner in
+                            AdminThumb(draft: draft, file: banner.file, fill: true)
+                                .frame(width: wide ? 150 : 90, height: wide ? 80 : 90)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay(alignment: .topLeading) {
+                                    removeButton {
+                                        draft.forget(banner.file)
+                                        draft.config[keyPath: items].removeAll { $0.file == banner.file }
+                                    }
+                                }
+                        }
+                    }
+                }
+            }
+            PhotosPicker(selection: $picks, matching: .images) {
+                Label("إضافة صور", systemImage: "photo.badge.plus")
+            }
+        }
+        .onChange(of: picks) { _, chosen in
+            guard !chosen.isEmpty else { return }
+            Task {
+                for item in chosen {
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let name = draft.addImage(data, maxSide: maxSide) {
+                        draft.config[keyPath: items].append(LibraryItem(file: name))
+                    }
+                }
+                picks = []
+            }
+        }
+    }
 }

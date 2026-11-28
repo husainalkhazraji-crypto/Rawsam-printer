@@ -32,6 +32,7 @@ let darkHeatWarning = "يرجى استخدام هذا الخيار فقط في �
 struct EditorView: View {
     let source: DesignSource
     @EnvironmentObject private var printer: PrinterManager
+    @EnvironmentObject private var cloud: CloudLibrary
     @StateObject private var model = EditorModel()
     @AppStorage("printMode") private var mode: PrintMode = .mhtLegacy
     @AppStorage("density") private var density: Density = .normal
@@ -46,7 +47,9 @@ struct EditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            infoBar
+            BannerView(items: cloud.config?.editorBanners ?? [], seconds: cloud.config?.bannerSeconds ?? 3, height: 110)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
             CanvasView(model: model)
                 .padding(.horizontal, 6)
                 .overlay { if loading { ProgressView().controlSize(.large) } }
@@ -113,33 +116,6 @@ struct EditorView: View {
             if Task.isCancelled { return }
             await model.processPending()
         }
-    }
-
-    // MARK: - الشريط العلوي
-
-    private var infoBar: some View {
-        HStack(spacing: 14) {
-            if let layer = model.selected {
-                let b = model.bounds(layer)
-                value("x", b.minX)
-                value("y", b.minY)
-                value("w", layer.widthMM)
-                value("h", layer.heightMM)
-                Text("r:\(Int(layer.rotation.rounded()))°")
-            } else {
-                Text("A4 · 210 × 297 mm")
-            }
-        }
-        .font(.caption.monospacedDigit())
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .background(Color.white)
-        .environment(\.layoutDirection, .leftToRight)
-    }
-
-    private func value(_ name: String, _ v: CGFloat) -> some View {
-        Text("\(name):\(Double(v), specifier: "%.1f")")
     }
 
     // MARK: - الأدوات

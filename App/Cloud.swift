@@ -19,10 +19,13 @@ struct LibraryConfig: Codable, Hashable {
     var passwordHash: String
     var bannerSeconds: Double = 3
     var banners: [LibraryItem] = []
+    var editorBanners: [LibraryItem]?     // إعلان صفحة الطباعة
+    var settingsBanners: [LibraryItem]?   // إعلان مربع بأسفل الإعدادات
     var categories: [LibraryCategory] = []
 
     var allFiles: Set<String> {
-        Set(banners.map(\.file) + categories.flatMap { $0.items.map(\.file) })
+        Set(banners.map(\.file) + (editorBanners ?? []).map(\.file) + (settingsBanners ?? []).map(\.file)
+            + categories.flatMap { $0.items.map(\.file) })
     }
 }
 

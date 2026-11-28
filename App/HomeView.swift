@@ -36,7 +36,8 @@ struct HomeView: View {
     @State private var pick: PhotosPickerItem?
 
     private let mine = "mine"
-    private var currentTab: String { tab ?? cloud.config?.categories.first?.id ?? mine }
+    /// أول ما يفتح التطبيق يطلع قسم «+» (صور المستخدم).
+    private var currentTab: String { tab ?? mine }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -45,7 +46,8 @@ struct HomeView: View {
                 tabs
                 ScrollView {
                     VStack(spacing: 14) {
-                        BannerView()
+                        BannerView(items: cloud.config?.banners ?? [], seconds: cloud.config?.bannerSeconds ?? 3)
+                            .padding(.horizontal)
                         grid
                     }
                     .padding(.vertical, 12)
@@ -105,7 +107,7 @@ struct HomeView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 22) {
                 ForEach(cloud.config?.categories ?? []) { tabButton($0.id, $0.name) }
-                tabButton(mine, "صوري")
+                tabButton(mine, "+")
             }
             .padding(.horizontal)
             .padding(.top, 6)
@@ -290,32 +292,34 @@ struct PrinterPicker: View {
     }
 }
 
+/// بانر صور يتبدل وحده. يستخدم بالرئيسية، صفحة الطباعة، والإعدادات.
 struct BannerView: View {
-    @EnvironmentObject private var cloud: CloudLibrary
+    let items: [LibraryItem]
+    let seconds: Double
+    var height: CGFloat? = 160
+    var square = false
     @State private var index = 0
 
     var body: some View {
-        let banners = cloud.config?.banners ?? []
-        let seconds = max(1, cloud.config?.bannerSeconds ?? 3)
-        if !banners.isEmpty {
+        if !items.isEmpty {
             TabView(selection: $index) {
-                ForEach(Array(banners.enumerated()), id: \.offset) { i, banner in
+                ForEach(Array(items.enumerated()), id: \.offset) { i, banner in
                     RemoteImage(url: Cloud.file(banner.file), fill: true)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped()
                         .tag(i)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: banners.count > 1 ? .always : .never))
-            .frame(height: 160)
+            .tabViewStyle(.page(indexDisplayMode: items.count > 1 ? .always : .never))
+            .frame(height: square ? nil : height)
+            .aspectRatio(square ? 1 : nil, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 18))
-            .padding(.horizontal)
-            .task(id: banners) {
-                guard banners.count > 1 else { return }
+            .task(id: items) {
+                guard items.count > 1 else { return }
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(seconds))
+                    try? await Task.sleep(for: .seconds(max(1, seconds)))
                     if Task.isCancelled { return }
-                    withAnimation(.easeInOut(duration: 0.5)) { index = (index + 1) % banners.count }
+                    withAnimation(.easeInOut(duration: 0.5)) { index = (index + 1) % items.count }
                 }
             }
         }
