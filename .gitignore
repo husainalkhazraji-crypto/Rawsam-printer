@@ -4,3 +4,4 @@ Payload/
 *.xcodeproj
 .DS_Store
 App/Assets.xcassets/
+worker/wrangler.toml
