@@ -5,6 +5,7 @@ import CryptoKit
 /// القراءة مجانية لكل المستخدمين، والكتابة تحتاج رمز GitHub عند المدير بس.
 struct LibraryItem: Codable, Hashable, Identifiable {
     var file: String
+    var link: String?       // رابط يفتح لما المستخدم يضغط على الإعلان
     var id: String { file }
 }
 
@@ -20,7 +21,9 @@ struct LibraryConfig: Codable, Hashable {
     var bannerSeconds: Double = 3
     var banners: [LibraryItem] = []
     var editorBanners: [LibraryItem]?     // إعلان صفحة الطباعة
-    var settingsBanners: [LibraryItem]?   // إعلان مربع بأسفل الإعدادات
+    var settingsBanners: [LibraryItem]?   // شريط «منتجاتنا» بأسفل الإعدادات
+    var productsLink: String?             // رابط واحد لشريط «منتجاتنا» كله
+    var social: SocialLinks?              // إنستغرام، فيسبوك، تيك توك، واتساب
     var categories: [LibraryCategory] = []
 
     var allFiles: Set<String> {

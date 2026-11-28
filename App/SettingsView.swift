@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var adminConfig: LibraryConfig?
     @State private var copied = false
     @State private var heatWarning = false
+    @State private var taps: [Date] = []
 
     var body: some View {
         Form {
@@ -45,12 +46,9 @@ struct SettingsView: View {
                 if let error = cloud.error { Text(error).foregroundStyle(.secondary) }
             }
 
-            Section {
-                Button {
-                    password = ""
-                    askPassword = true
-                } label: {
-                    Label("Admin", systemImage: "lock.fill")
+            if let social = cloud.config?.social, !SocialRow(social: social).isEmpty {
+                Section("تواصل ويّانا") {
+                    SocialRow(social: social)
                 }
             }
 
@@ -74,17 +72,21 @@ struct SettingsView: View {
             Section {
                 LabeledContent("الإصدار", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "-")
             } footer: {
+                // باب المدير المخفي: 5 ضغطات.
                 Text("Designed by Rawsam Tattoo")
                     .font(.footnote.weight(.semibold))
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 8)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                    .onTapGesture { secretTap() }
             }
 
-            if let ads = cloud.config?.settingsBanners, !ads.isEmpty {
+            if let products = cloud.config?.settingsBanners, !products.isEmpty {
                 Section {
-                    BannerView(items: ads, seconds: cloud.config?.bannerSeconds ?? 3, square: true)
-                        .listRowInsets(EdgeInsets())
+                    ProductsStrip(items: products, seconds: cloud.config?.bannerSeconds ?? 3,
+                                  link: Links.url(cloud.config?.productsLink))
                         .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 }
             }
         }
@@ -105,6 +107,16 @@ struct SettingsView: View {
         }
         .navigationDestination(item: $adminConfig) { config in
             AdminView(config: config)
+        }
+    }
+
+    private func secretTap() {
+        let now = Date()
+        taps = taps.filter { now.timeIntervalSince($0) < 3 } + [now]
+        if taps.count >= 5 {
+            taps = []
+            password = ""
+            askPassword = true
         }
     }
 
@@ -229,7 +241,19 @@ struct AdminView: View {
 
             AdminBannerSection(title: "بانر الصفحة الرئيسية", draft: draft, items: \.banners, maxSide: 1600, wide: true)
             AdminBannerSection(title: "إعلان صفحة الطباعة", draft: draft, items: \.editorBannerList, maxSide: 1600, wide: true)
-            AdminBannerSection(title: "إعلان الإعدادات (مربع)", draft: draft, items: \.settingsBannerList, maxSide: 1200, wide: false)
+            AdminBannerSection(title: "منتجاتنا (أسفل الإعدادات)", draft: draft, items: \.settingsBannerList, maxSide: 1000, wide: false)
+            Section {
+                TextField("رابط شريط منتجاتنا", text: $draft.config.productsLinkText)
+                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+            } footer: {
+                Text("رابط واحد يفتح لما أحد يضغط على شريط منتجاتنا.")
+            }
+            Section("روابط التواصل") {
+                socialField("إنستغرام (اسم الحساب أو رابط)", \.instagram)
+                socialField("فيسبوك (اسم الصفحة أو رابط)", \.facebook)
+                socialField("تيك توك (اسم الحساب أو رابط)", \.tiktok)
+                socialField("رقم الواتساب (مثل 07701234567)", \.whatsapp)
+            }
             Section {
                 Stepper("البانرات تتبدل كل \(Int(draft.config.bannerSeconds)) ثانية", value: $draft.config.bannerSeconds, in: 1...10, step: 1)
             }
@@ -266,6 +290,18 @@ struct AdminView: View {
         .alert(message ?? "", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
             Button("تمام", role: .cancel) {}
         }
+    }
+
+    private func socialField(_ title: String, _ key: WritableKeyPath<SocialLinks, String?>) -> some View {
+        TextField(title, text: Binding(
+            get: { draft.config.social?[keyPath: key] ?? "" },
+            set: { value in
+                var social = draft.config.social ?? SocialLinks()
+                social[keyPath: key] = value.isEmpty ? nil : value
+                draft.config.social = social
+            }))
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
     }
 
     private func upload() {
@@ -385,6 +421,10 @@ extension LibraryConfig {
         get { settingsBanners ?? [] }
         set { settingsBanners = newValue }
     }
+    var productsLinkText: String {
+        get { productsLink ?? "" }
+        set { productsLink = newValue.isEmpty ? nil : newValue }
+    }
 }
 
 /// قسم بانر بلوحة المدير: صور، حذف، وإضافة.
@@ -396,15 +436,39 @@ struct AdminBannerSection: View {
     let wide: Bool
     @State private var picks: [PhotosPickerItem] = []
 
+    private func linkBinding(_ file: String) -> Binding<String> {
+        Binding(get: { draft.config[keyPath: items].first { $0.file == file }?.link ?? "" },
+                set: { value in
+                    if let i = draft.config[keyPath: items].firstIndex(where: { $0.file == file }) {
+                        draft.config[keyPath: items][i].link = value.isEmpty ? nil : value
+                    }
+                })
+    }
+
     var body: some View {
         Section(title) {
             let list = draft.config[keyPath: items]
-            if !list.isEmpty {
+            if wide {
+                ForEach(list) { banner in
+                    HStack(spacing: 10) {
+                        AdminThumb(draft: draft, file: banner.file, fill: true)
+                            .frame(width: 96, height: 52)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        TextField("رابط عند الضغط (اختياري)", text: linkBinding(banner.file))
+                            .font(.footnote)
+                            .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        removeButton {
+                            draft.forget(banner.file)
+                            draft.config[keyPath: items].removeAll { $0.file == banner.file }
+                        }
+                    }
+                }
+            } else if !list.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
                         ForEach(list) { banner in
                             AdminThumb(draft: draft, file: banner.file, fill: true)
-                                .frame(width: wide ? 150 : 90, height: wide ? 80 : 90)
+                                .frame(width: 80, height: 80)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                                 .overlay(alignment: .topLeading) {
                                     removeButton {

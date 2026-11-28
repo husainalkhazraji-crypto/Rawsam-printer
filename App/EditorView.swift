@@ -47,7 +47,7 @@ struct EditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            BannerView(items: cloud.config?.editorBanners ?? [], seconds: cloud.config?.bannerSeconds ?? 3, height: 110)
+            BannerView(items: cloud.config?.editorBanners ?? [], seconds: cloud.config?.bannerSeconds ?? 3, height: 160)
                 .padding(.horizontal)
                 .padding(.vertical, 8)
             CanvasView(model: model)

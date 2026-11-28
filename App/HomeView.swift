@@ -299,6 +299,7 @@ struct BannerView: View {
     var height: CGFloat? = 160
     var square = false
     @State private var index = 0
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         if !items.isEmpty {
@@ -307,6 +308,8 @@ struct BannerView: View {
                     RemoteImage(url: Cloud.file(banner.file), fill: true)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped()
+                        .contentShape(Rectangle())
+                        .onTapGesture { if let url = Links.url(banner.link) { openURL(url) } }
                         .tag(i)
                 }
             }
