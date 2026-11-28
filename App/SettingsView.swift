@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var password = ""
     @State private var problem: String?
     @State private var adminConfig: LibraryConfig?
+    @State private var loggingIn = false
     @State private var copied = false
     @State private var heatWarning = false
     @State private var taps: [Date] = []
@@ -45,6 +46,8 @@ struct SettingsView: View {
                 }
                 if let error = cloud.error { Text(error).foregroundStyle(.secondary) }
             }
+
+            SuggestionSection()
 
             if let social = cloud.config?.social, !SocialRow(social: social).isEmpty {
                 Section("تواصل ويّانا") {
@@ -105,6 +108,7 @@ struct SettingsView: View {
         .alert(problem ?? "", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
             Button("تمام", role: .cancel) {}
         }
+        .overlay { if loggingIn { ProgressView().controlSize(.large) } }
         .navigationDestination(item: $adminConfig) { config in
             AdminView(config: config)
         }
@@ -121,14 +125,18 @@ struct SettingsView: View {
     }
 
     private func checkPassword() {
-        guard let config = cloud.config else {
-            problem = "حدّث المكتبة أولاً (تحتاج إنترنت)"
-            return
-        }
-        if Cloud.hash(password) == config.passwordHash {
-            adminConfig = config
-        } else {
-            problem = "كلمة السر غلط"
+        let entered = password
+        password = ""
+        loggingIn = true
+        Task {
+            do {
+                try await Server.login(password: entered)
+                await cloud.refresh()
+                if let config = cloud.config { adminConfig = config } else { problem = "تعذر تحميل المكتبة" }
+            } catch {
+                problem = error.localizedDescription
+            }
+            loggingIn = false
         }
     }
 }
@@ -174,8 +182,8 @@ final class AdminDraft: ObservableObject {
 struct AdminView: View {
     @EnvironmentObject private var cloud: CloudLibrary
     @StateObject private var draft: AdminDraft
-    @State private var token = Keychain.read(Cloud.tokenKey) ?? ""
-    @State private var tokenField = ""
+    @AppStorage("messagesLastSeen") private var lastSeen: Double = 0
+    @State private var newMessages = 0
     @State private var newCategory = ""
     @State private var newPassword = ""
     @State private var status: String?
@@ -188,23 +196,22 @@ struct AdminView: View {
     var body: some View {
         Form {
             Section {
-                if token.isEmpty {
-                    Label("السحابة مو مربوطة بهذا التلفون", systemImage: "xmark.icloud").foregroundStyle(Color.brand)
-                } else {
-                    Label("السحابة مربوطة", systemImage: "checkmark.icloud.fill").foregroundStyle(Color.ok)
+                NavigationLink {
+                    MessagesView(lastSeen: $lastSeen)
+                } label: {
+                    HStack {
+                        Label("رسائل المستخدمين", systemImage: "envelope.fill")
+                        Spacer()
+                        if newMessages > 0 {
+                            Text("\(newMessages)")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color.brand))
+                        }
+                    }
                 }
-                SecureField("الصق رمز GitHub هنا", text: $tokenField)
-                Button("حفظ الرمز") {
-                    let clean = tokenField.trimmingCharacters(in: .whitespacesAndNewlines)
-                    Keychain.save(clean, for: Cloud.tokenKey)
-                    token = clean
-                    tokenField = ""
-                }
-                .disabled(tokenField.trimmingCharacters(in: .whitespaces).isEmpty)
-            } header: {
-                Text("ربط السحابة")
-            } footer: {
-                Text("مرة وحدة بس بهذا التلفون. الرمز ينحفظ بشكل آمن ومحد يشوفه.")
             }
 
             Section {
@@ -259,13 +266,18 @@ struct AdminView: View {
             }
 
             Section("كلمة سر المدير") {
-                SecureField("كلمة سر جديدة (4 أحرف أو أكثر)", text: $newPassword)
+                SecureField("كلمة سر جديدة (6 أحرف أو أكثر)", text: $newPassword)
                 Button("تغيير كلمة السر") {
-                    draft.config.passwordHash = Cloud.hash(newPassword)
+                    let password = newPassword
                     newPassword = ""
-                    message = "تتغير بعد ما تضغط «رفع»"
+                    Task {
+                        do {
+                            try await Server.changePassword(password)
+                            message = "تغيّرت كلمة السر ✓"
+                        } catch { message = error.localizedDescription }
+                    }
                 }
-                .disabled(newPassword.count < 4)
+                .disabled(newPassword.count < 6)
             }
         }
         .navigationTitle("لوحة المدير")
@@ -273,7 +285,7 @@ struct AdminView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("رفع", action: upload)
                     .bold()
-                    .disabled(!draft.dirty || status != nil || token.isEmpty)
+                    .disabled(!draft.dirty || status != nil)
             }
             ToolbarItem(placement: .topBarTrailing) { EditButton() }
         }
@@ -290,6 +302,10 @@ struct AdminView: View {
         .alert(message ?? "", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
             Button("تمام", role: .cancel) {}
         }
+        .task(id: lastSeen) {
+            let all = (try? await Server.messages()) ?? []
+            newMessages = all.filter { $0.date > lastSeen }.count
+        }
     }
 
     private func socialField(_ title: String, _ key: WritableKeyPath<SocialLinks, String?>) -> some View {
@@ -305,11 +321,11 @@ struct AdminView: View {
     }
 
     private func upload() {
-        let config = draft.config, files = draft.newFiles, deleted = draft.deleted
+        let config = draft.config, files = draft.newFiles
         status = "أبدي الرفع…"
         Task {
             do {
-                let saved = try await GitHubUploader(token: token).upload(config: config, newFiles: files, deleted: deleted) { text in
+                let saved = try await Server.publish(config: config, newFiles: files) { text in
                     Task { @MainActor in status = text }
                 }
                 cloud.apply(saved)
@@ -496,5 +512,152 @@ struct AdminBannerSection: View {
                 picks = []
             }
         }
+    }
+}
+
+
+// MARK: - الرسائل
+
+/// مربع «اقترح تعديل أو إضافة» للمستخدمين.
+struct SuggestionSection: View {
+    @State private var text = ""
+    @State private var contact = ""
+    @State private var sending = false
+    @State private var result: String?
+    @AppStorage("lastMessageDay") private var lastDay = ""
+    private let limit = 300
+
+    private var today: String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f.string(from: Date())
+    }
+
+    var body: some View {
+        Section {
+            if lastDay == today {
+                Label("وصلتنا رسالتك، شكراً! تگدر ترسل رسالة ثانية باچر.", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(Color.ok)
+            } else {
+                TextField("رقمك أو حسابك حتى نرد عليك (اختياري)", text: $contact)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("اكتب اقتراحك هنا…", text: $text, axis: .vertical)
+                    .lineLimit(3...6)
+                    .onChange(of: text) { _, new in if new.count > limit { text = String(new.prefix(limit)) } }
+                HStack {
+                    Text("\(limit - text.count) حرف باقي")
+                        .font(.caption)
+                        .foregroundStyle(text.count >= limit ? Color.brand : .secondary)
+                    Spacer()
+                    Button {
+                        send()
+                    } label: {
+                        if sending { ProgressView() } else { Label("إرسال", systemImage: "paperplane.fill") }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(sending || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            if let result { Text(result).font(.caption).foregroundStyle(Color.brand) }
+        } header: {
+            Text("اقترح تعديل أو إضافة")
+        }
+    }
+
+    private func send() {
+        sending = true
+        result = nil
+        Task {
+            do {
+                try await Server.sendMessage(text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                                             contact: contact.trimmingCharacters(in: .whitespacesAndNewlines))
+                lastDay = today
+                text = ""
+                contact = ""
+            } catch {
+                result = error.localizedDescription
+            }
+            sending = false
+        }
+    }
+}
+
+/// رسائل المستخدمين بلوحة المدير.
+struct MessagesView: View {
+    @Binding var lastSeen: Double
+    @Environment(\.openURL) private var openURL
+    @State private var messages: [UserMessage] = []
+    @State private var loading = true
+    @State private var problem: String?
+
+    var body: some View {
+        List {
+            if loading && messages.isEmpty {
+                HStack { Spacer(); ProgressView(); Spacer() }
+            } else if messages.isEmpty {
+                ContentUnavailableView("ما اكو رسائل", systemImage: "envelope.open",
+                                       description: Text("الرسائل تنحذف وحدها بعد أسبوع."))
+            }
+            ForEach(messages) { message in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        if message.date > lastSeen {
+                            Circle().fill(Color.brand).frame(width: 8, height: 8)
+                        }
+                        Text(message.time, format: .dateTime.day().month().hour().minute())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    Text(message.text)
+                    if let contact = message.contact, !contact.isEmpty {
+                        Button {
+                            if let url = contactURL(contact) { openURL(url) }
+                        } label: {
+                            Label(contact, systemImage: "person.crop.circle")
+                                .font(.subheadline)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .onDelete { offsets in
+                let removed = offsets.map { messages[$0] }
+                messages.remove(atOffsets: offsets)
+                Task {
+                    for m in removed {
+                        do { try await Server.deleteMessage(m.id) } catch { problem = error.localizedDescription }
+                    }
+                }
+            }
+        }
+        .navigationTitle("رسائل المستخدمين")
+        .refreshable { await load() }
+        .task { await load() }
+        .onDisappear {
+            if let newest = messages.first?.date { lastSeen = max(lastSeen, newest) }
+        }
+        .alert(problem ?? "", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
+            Button("تمام", role: .cancel) {}
+        }
+    }
+
+    private func load() async {
+        loading = true
+        do { messages = try await Server.messages() } catch { problem = error.localizedDescription }
+        loading = false
+    }
+
+    /// رقم ← واتساب، وغيره ← إنستغرام أو رابط.
+    private func contactURL(_ contact: String) -> URL? {
+        let digits = contact.filter(\.isNumber)
+        let visible = contact.filter({ !$0.isWhitespace }).count
+        if digits.count >= 8 && digits.count >= visible - 2 {
+            return Links.url(contact, kind: .whatsapp)
+        }
+        return Links.url(contact, kind: contact.contains(".") ? .web : .instagram)
     }
 }

@@ -1,8 +1,7 @@
 import SwiftUI
-import CryptoKit
 
-/// المكتبة السحابية: ملفات بفرع library بنفس مستودع GitHub.
-/// القراءة مجانية لكل المستخدمين، والكتابة تحتاج رمز GitHub عند المدير بس.
+/// المكتبة السحابية على سيرفر Cloudflare (مجاني).
+/// القراءة لكل المستخدمين، والتعديل للمدير بس بعد ما يدخل بكلمة السر.
 struct LibraryItem: Codable, Hashable, Identifiable {
     var file: String
     var link: String?       // رابط يفتح لما المستخدم يضغط على الإعلان
@@ -17,7 +16,7 @@ struct LibraryCategory: Codable, Hashable, Identifiable {
 
 struct LibraryConfig: Codable, Hashable {
     var version = 1
-    var passwordHash: String
+    var passwordHash: String?             // قديم (أيام GitHub)، السيرفر ما يرجعه
     var bannerSeconds: Double = 3
     var banners: [LibraryItem] = []
     var editorBanners: [LibraryItem]?     // إعلان صفحة الطباعة
@@ -36,21 +35,11 @@ struct LibraryConfig: Codable, Hashable {
 }
 
 enum Cloud {
-    static let owner = "husainalkhazraji-crypto"
-    static let repo = "Rawsam-printer"
-    static let branch = "library"
-    static let tokenKey = "githubToken"
+    static let base = URL(string: "https://rawsam.husain-alkhazraji.workers.dev/")!
+    static let sessionKey = "adminSession"
 
-    static let api = URL(string: "https://api.github.com/repos/\(owner)/\(repo)/")!
-
-    static func raw(_ ref: String, _ path: String) -> URL {
-        URL(string: "https://raw.githubusercontent.com/\(owner)/\(repo)/\(ref)/\(path)")!
-    }
-
-    static func file(_ name: String) -> URL { raw(branch, "files/" + name) }
-
-    static func hash(_ password: String) -> String {
-        SHA256.hash(data: Data(password.utf8)).map { String(format: "%02x", $0) }.joined()
+    static func file(_ name: String) -> URL {
+        base.appendingPathComponent("files").appendingPathComponent(name)
     }
 }
 
@@ -75,29 +64,15 @@ final class CloudLibrary: ObservableObject {
         loading = true
         defer { loading = false }
         do {
-            // نجيب آخر نسخة بالضبط حتى ما ننتظر كاش GitHub.
-            let ref = (try? await latestCommit()) ?? Cloud.branch
-            var request = URLRequest(url: Cloud.raw(ref, "config.json"))
+            var request = URLRequest(url: Cloud.base.appendingPathComponent("config"))
             request.cachePolicy = .reloadIgnoringLocalCacheData
             let (data, response) = try await URLSession.shared.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-            let fresh = try JSONDecoder().decode(LibraryConfig.self, from: data)
-            apply(fresh)
+            apply(try JSONDecoder().decode(LibraryConfig.self, from: data))
             self.error = nil
         } catch {
             self.error = "تعذر تحديث المكتبة، تأكد من الإنترنت"
         }
-    }
-
-    private func latestCommit() async throws -> String {
-        var request = URLRequest(url: Cloud.api.appendingPathComponent("commits/\(Cloud.branch)"))
-        request.setValue("application/vnd.github.sha", forHTTPHeaderField: "Accept")
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200,
-              let sha = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              sha.count == 40 else { throw URLError(.badServerResponse) }
-        return sha
     }
 
     func apply(_ fresh: LibraryConfig) {
@@ -106,94 +81,88 @@ final class CloudLibrary: ObservableObject {
     }
 }
 
-enum UploadError: LocalizedError {
+struct UserMessage: Codable, Identifiable, Hashable {
+    let id: String
+    let text: String
+    let contact: String?
+    let date: Double   // ملي ثانية
+    var time: Date { Date(timeIntervalSince1970: date / 1000) }
+}
+
+enum ServerError: LocalizedError {
     case message(String)
     var errorDescription: String? {
         switch self { case .message(let text): return text }
     }
 }
 
-/// يرفع كل التغييرات بعملية وحدة (commit) على فرع library.
-struct GitHubUploader {
-    let token: String
+/// كل الاتصال بالسيرفر.
+enum Server {
+    private struct Failure: Decodable { let error: String }
+    private struct Token: Decodable { let token: String }
 
-    /// يرجع المكتبة بعد التنظيف (بدون روابط لصور محذوفة).
-    @discardableResult
-    func upload(config: LibraryConfig, newFiles: [String: Data], deleted: Set<String>,
-                progress: @escaping (String) -> Void) async throws -> LibraryConfig {
-        progress("أتصل بالسحابة…")
-        let ref = try await call("GET", "git/ref/heads/\(Cloud.branch)")
-        guard let head = (ref["object"] as? [String: Any])?["sha"] as? String else { throw UploadError.message("ما لكيت فرع المكتبة") }
-        let commit = try await call("GET", "git/commits/\(head)")
-        guard let baseTree = (commit["tree"] as? [String: Any])?["sha"] as? String else { throw UploadError.message("رد غير متوقع من GitHub") }
-
-        // الصور الموجودة فعلاً بالسحابة هسه.
-        let tree = try await call("GET", "git/trees/\(baseTree)?recursive=1")
-        var existing = Set<String>()
-        for entry in tree["tree"] as? [[String: Any]] ?? [] {
-            if let path = entry["path"] as? String, path.hasPrefix("files/"), entry["type"] as? String == "blob" {
-                existing.insert(String(path.dropFirst(6)))
-            }
-        }
-        // نشيل أي رابط لصورة مو موجودة، حتى ما تطلع صور فارغة.
-        let available = existing.union(newFiles.keys)
-        var config = config
-        config.banners.removeAll { !available.contains($0.file) }
-        config.editorBanners?.removeAll { !available.contains($0.file) }
-        config.settingsBanners?.removeAll { !available.contains($0.file) }
-        for i in config.categories.indices { config.categories[i].items.removeAll { !available.contains($0.file) } }
-        // نحذف بس الصور الموجودة الي ما عاد يستخدمها أي قسم أو بانر.
-        let unused = existing.subtracting(config.allFiles)
-
-        var entries: [[String: Any]] = []
-        var done = 0
-        for (name, data) in newFiles {
-            done += 1
-            progress("أرفع الصور \(done) من \(newFiles.count)")
-            let blob = try await call("POST", "git/blobs", ["content": data.base64EncodedString(), "encoding": "base64"])
-            guard let sha = blob["sha"] as? String else { throw UploadError.message("فشل رفع صورة") }
-            entries.append(["path": "files/\(name)", "mode": "100644", "type": "blob", "sha": sha])
-        }
-        for name in unused {
-            entries.append(["path": "files/\(name)", "mode": "100644", "type": "blob", "sha": NSNull()])
-        }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let json = String(decoding: try encoder.encode(config), as: UTF8.self)
-        entries.append(["path": "config.json", "mode": "100644", "type": "blob", "content": json])
-
-        progress("أحفظ التغييرات…")
-        let newTree = try await call("POST", "git/trees", ["base_tree": baseTree, "tree": entries])
-        guard let treeSha = newTree["sha"] as? String else { throw UploadError.message("فشل حفظ التغييرات") }
-        let newCommit = try await call("POST", "git/commits", ["message": "تحديث المكتبة من التطبيق", "tree": treeSha, "parents": [head]])
-        guard let commitSha = newCommit["sha"] as? String else { throw UploadError.message("فشل حفظ التغييرات") }
-        _ = try await call("PATCH", "git/refs/heads/\(Cloud.branch)", ["sha": commitSha])
-        return config
-    }
-
-    private func call(_ method: String, _ path: String, _ body: [String: Any]? = nil) async throws -> [String: Any] {
-        var request = URLRequest(url: URL(string: path, relativeTo: Cloud.api)!)
+    private static func call(_ method: String, _ path: String, body: Data? = nil,
+                             contentType: String = "application/json", admin: Bool = false) async throws -> Data {
+        var request = URLRequest(url: URL(string: path, relativeTo: Cloud.base)!)
         request.httpMethod = method
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        if let body {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        if admin, let token = Keychain.read(Cloud.sessionKey) {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         let data: Data
         let response: URLResponse
         do { (data, response) = try await URLSession.shared.data(for: request) } catch {
-            throw UploadError.message("ما اكو إنترنت أو الاتصال انقطع")
+            throw ServerError.message("ما اكو إنترنت أو الاتصال انقطع")
         }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
-            switch code {
-            case 401: throw UploadError.message("رمز GitHub غلط أو منتهي")
-            case 403, 404: throw UploadError.message("رمز GitHub ما عنده صلاحية الكتابة على المستودع")
-            default: throw UploadError.message("خطأ من GitHub (\(code))")
-            }
+            if let failure = try? JSONDecoder().decode(Failure.self, from: data) { throw ServerError.message(failure.error) }
+            throw ServerError.message("خطأ من السيرفر (\(code))")
         }
-        return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        return data
+    }
+
+    private static func encode(_ value: [String: String]) -> Data { (try? JSONEncoder().encode(value)) ?? Data() }
+
+    // المستخدمين
+    static func sendMessage(text: String, contact: String) async throws {
+        let device = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        _ = try await call("POST", "messages", body: encode(["text": text, "contact": contact, "device": device]))
+    }
+
+    // المدير
+    static func login(password: String) async throws {
+        let data = try await call("POST", "admin/login", body: encode(["password": password]))
+        Keychain.save(try JSONDecoder().decode(Token.self, from: data).token, for: Cloud.sessionKey)
+    }
+
+    static func changePassword(_ password: String) async throws {
+        let data = try await call("POST", "admin/password", body: encode(["password": password]), admin: true)
+        Keychain.save(try JSONDecoder().decode(Token.self, from: data).token, for: Cloud.sessionKey)
+    }
+
+    /// يرفع الصور الجديدة وبعدين الإعدادات. السيرفر يحذف الصور الي ما عاد مستخدمة.
+    static func publish(config: LibraryConfig, newFiles: [String: Data], progress: @escaping (String) -> Void) async throws -> LibraryConfig {
+        var done = 0
+        for (name, data) in newFiles {
+            done += 1
+            progress("أرفع الصور \(done) من \(newFiles.count)")
+            _ = try await call("PUT", "admin/files/\(name)", body: data, contentType: "image/jpeg", admin: true)
+        }
+        progress("أحفظ التغييرات…")
+        var clean = config
+        clean.passwordHash = nil
+        let saved = try await call("PUT", "admin/config", body: try JSONEncoder().encode(clean), admin: true)
+        return try JSONDecoder().decode(LibraryConfig.self, from: saved)
+    }
+
+    static func messages() async throws -> [UserMessage] {
+        try JSONDecoder().decode([UserMessage].self, from: try await call("GET", "admin/messages", admin: true))
+    }
+
+    static func deleteMessage(_ id: String) async throws {
+        _ = try await call("DELETE", "admin/messages/\(id)", admin: true)
     }
 }
