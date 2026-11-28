@@ -1,169 +1,150 @@
 {
-  "bannerSeconds" : 3,
-  "banners" : [
+  "bannerSeconds": 3,
+  "banners": [
     {
-      "file" : "9cf34334f30b41a79d71bb85f0c03dfa.jpg"
+      "file": "9cf34334f30b41a79d71bb85f0c03dfa.jpg"
     },
     {
-      "file" : "1c187dd7-12ca-4dc8-8fd6-5b77d8e28e11.jpg"
+      "file": "1c187dd7-12ca-4dc8-8fd6-5b77d8e28e11.jpg"
     }
   ],
-  "categories" : [
+  "categories": [
     {
-      "id" : "small",
-      "items" : [
+      "id": "small",
+      "items": [
         {
-          "file" : "a33d276b-faa0-46cb-8351-868e4bc336e2.jpg"
+          "file": "a33d276b-faa0-46cb-8351-868e4bc336e2.jpg"
         },
         {
-          "file" : "9d5549ff-5713-402b-9944-67bf0a6024a2.jpg"
+          "file": "9d5549ff-5713-402b-9944-67bf0a6024a2.jpg"
         },
         {
-          "file" : "ea4a95d3-2941-403c-9a82-c0e41e4a41b9.jpg"
+          "file": "ea4a95d3-2941-403c-9a82-c0e41e4a41b9.jpg"
         },
         {
-          "file" : "304fd08f-6bff-4f3c-aa5d-1f0cf85cf1b1.jpg"
+          "file": "304fd08f-6bff-4f3c-aa5d-1f0cf85cf1b1.jpg"
         },
         {
-          "file" : "77c75a9f-a918-4b42-9db6-63794314cfa0.jpg"
+          "file": "77c75a9f-a918-4b42-9db6-63794314cfa0.jpg"
         }
       ],
-      "name" : "وشمات صغيرة"
+      "name": "وشمات صغيرة"
     },
     {
-      "id" : "flowers",
-      "items" : [
+      "id": "flowers",
+      "items": [
         {
-          "file" : "d762dc6a-fdeb-47db-9367-ab3f2885bda1.jpg"
+          "file": "d762dc6a-fdeb-47db-9367-ab3f2885bda1.jpg"
         },
         {
-          "file" : "5828605a-83b4-4765-b236-fe16836bd723.jpg"
+          "file": "5828605a-83b4-4765-b236-fe16836bd723.jpg"
         },
         {
-          "file" : "5ef6c1fb-987d-4eac-bea3-7a0276898b58.jpg"
+          "file": "5ef6c1fb-987d-4eac-bea3-7a0276898b58.jpg"
         },
         {
-          "file" : "ea53ad7c-d987-48d9-bfba-2d7b76a32aef.jpg"
+          "file": "ea53ad7c-d987-48d9-bfba-2d7b76a32aef.jpg"
         },
         {
-          "file" : "5009c6f9-d372-4244-926e-bb96b4abeb32.jpg"
+          "file": "5009c6f9-d372-4244-926e-bb96b4abeb32.jpg"
         },
         {
-          "file" : "6265270a-cc71-4b32-b7fe-6cd76ceef070.jpg"
+          "file": "6265270a-cc71-4b32-b7fe-6cd76ceef070.jpg"
         },
         {
-          "file" : "8953e35f-211f-4e04-a740-03191274cf6c.jpg"
+          "file": "8953e35f-211f-4e04-a740-03191274cf6c.jpg"
         },
         {
-          "file" : "8de0a04f-e379-40a5-b1d9-40475ca103c7.jpg"
+          "file": "8de0a04f-e379-40a5-b1d9-40475ca103c7.jpg"
         },
         {
-          "file" : "232759ca-0d84-4af1-9f0e-601217db0363.jpg"
+          "file": "232759ca-0d84-4af1-9f0e-601217db0363.jpg"
         }
       ],
-      "name" : "ورود"
+      "name": "ورود"
     },
     {
-      "id" : "practical",
-      "items" : [
+      "id": "practical",
+      "items": [
         {
-          "file" : "5c345859-bff7-45fb-9bbb-86a220bca4e5.jpg"
+          "file": "5c345859-bff7-45fb-9bbb-86a220bca4e5.jpg"
         },
         {
-          "file" : "aeb1403d-fba8-432a-a667-5a4c51c5e43d.jpg"
+          "file": "aeb1403d-fba8-432a-a667-5a4c51c5e43d.jpg"
         },
         {
-          "file" : "377741b8-8db5-4cd6-8041-0861a5aae261.jpg"
+          "file": "377741b8-8db5-4cd6-8041-0861a5aae261.jpg"
         },
         {
-          "file" : "61f2bad9-ccef-492d-aba8-c2d27e2593ef.jpg"
+          "file": "61f2bad9-ccef-492d-aba8-c2d27e2593ef.jpg"
         },
         {
-          "file" : "1d08642f-2db0-4df3-b658-6fc1d4414cd3.jpg"
+          "file": "1d08642f-2db0-4df3-b658-6fc1d4414cd3.jpg"
         },
         {
-          "file" : "0596760f-3406-4b1e-83d5-cce727874f06.jpg"
+          "file": "0596760f-3406-4b1e-83d5-cce727874f06.jpg"
         }
       ],
-      "name" : "وشم عملية"
+      "name": "وشم عملية"
     },
     {
-      "id" : "hearts",
-      "items" : [
-        {
-          "file" : "8f53389a133d4233aad99ce8a8281510.jpg"
-        }
-      ],
-      "name" : "قلوب"
+      "id": "hearts",
+      "items": [],
+      "name": "قلوب"
     },
     {
-      "id" : "886c85fa-790c-4dab-a9fb-3e635f3819a2",
-      "items" : [
+      "id": "886c85fa-790c-4dab-a9fb-3e635f3819a2",
+      "items": [
         {
-          "file" : "e89c1b9c-db56-406a-8904-43ed3673459b.jpg"
+          "file": "e89c1b9c-db56-406a-8904-43ed3673459b.jpg"
         },
         {
-          "file" : "7fc2f127-a142-491f-9f2a-056e23422e9b.jpg"
+          "file": "7fc2f127-a142-491f-9f2a-056e23422e9b.jpg"
         },
         {
-          "file" : "7e60b13f-c793-4891-8fab-c6f1d3809068.jpg"
+          "file": "7e60b13f-c793-4891-8fab-c6f1d3809068.jpg"
         },
         {
-          "file" : "7c216817-5874-4ae1-ae2b-d30f7a19417e.jpg"
+          "file": "7c216817-5874-4ae1-ae2b-d30f7a19417e.jpg"
         },
         {
-          "file" : "c9c66462-6a3a-40bb-ab7f-9bcbe5141243.jpg"
+          "file": "c9c66462-6a3a-40bb-ab7f-9bcbe5141243.jpg"
         },
         {
-          "file" : "0cd64fcb-b42c-46ea-bd3c-da986e40900f.jpg"
+          "file": "0cd64fcb-b42c-46ea-bd3c-da986e40900f.jpg"
         },
         {
-          "file" : "aa194a2f-e83a-4134-82b3-ea7cac938779.jpg"
+          "file": "aa194a2f-e83a-4134-82b3-ea7cac938779.jpg"
         },
         {
-          "file" : "0b39f700-ff8f-40c6-ba6f-ce6850e7d6cc.jpg"
+          "file": "0b39f700-ff8f-40c6-ba6f-ce6850e7d6cc.jpg"
         },
         {
-          "file" : "9941f2ff-718f-4427-b449-daecf37312c8.jpg"
+          "file": "9941f2ff-718f-4427-b449-daecf37312c8.jpg"
         }
       ],
-      "name" : "عائلة"
+      "name": "عائلة"
     },
     {
-      "id" : "bd3926a0-cfe1-4e0d-ba15-83f8beda8a81",
-      "items" : [
+      "id": "bd3926a0-cfe1-4e0d-ba15-83f8beda8a81",
+      "items": [
         {
-          "file" : "188c1a11-0f9b-4789-a0ed-232ee1c6bfa7.jpg"
+          "file": "188c1a11-0f9b-4789-a0ed-232ee1c6bfa7.jpg"
         }
       ],
-      "name" : "قلوب"
+      "name": "قلوب"
     }
   ],
-  "editorBanners" : [
+  "editorBanners": [
     {
-      "file" : "32cdd77cdd5e47759389c936e8528ad8.jpg"
-    },
-    {
-      "file" : "9cf34334f30b41a79d71bb85f0c03dfa.jpg"
-    },
-    {
-      "file" : "f127631d-a73c-4f4a-b228-9a5915d77cc0.jpg"
-    },
-    {
-      "file" : "f43164c6-8650-44c1-8c9c-f88c43a98169.jpg"
-    },
-    {
-      "file" : "a3542773-ebca-4f23-9a40-673c64e88d3c.jpg"
-    },
-    {
-      "file" : "5150e38f-4ca0-4212-bbf3-eba12494c7ab.jpg"
+      "file": "9cf34334f30b41a79d71bb85f0c03dfa.jpg"
     }
   ],
-  "passwordHash" : "a0699fbb1a369de35c495bfc2abf2db96f1b5fd4106d0245f001321ca9e46696",
-  "settingsBanners" : [
+  "passwordHash": "a0699fbb1a369de35c495bfc2abf2db96f1b5fd4106d0245f001321ca9e46696",
+  "settingsBanners": [
     {
-      "file" : "56bd4d1b82574ce18bd1999d8596fe56.jpg"
+      "file": "56bd4d1b82574ce18bd1999d8596fe56.jpg"
     }
   ],
-  "version" : 1
+  "version": 1
 }
